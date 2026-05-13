@@ -64,6 +64,18 @@ def get_status(
     return CalendarStatusResponse(session_id=session_id, connected_providers=connected)
 
 
+@router.delete("/history")
+def clear_history(
+    request: Request,
+    session_id: str,
+    current_user: UserPayload = Depends(get_current_user),
+    store: AbstractSessionStore = Depends(get_session_store),
+) -> dict:
+    """Wipe conversation history so the user can start a fresh chat."""
+    store.clear_history(session_id)
+    return {"success": True}
+
+
 @router.get("/history")
 def get_history(
     request: Request,

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Calendar, CalendarDays, Loader2, LogOut, MessageSquare, Send } from "lucide-react";
+import { Calendar, CalendarDays, Loader2, LogOut, MessageSquare, PenSquare, Send } from "lucide-react";
 import { useChat } from "@/hooks/useChat";
 import type { StoredUser } from "@/lib/auth";
 import { BookingsView } from "./BookingsView";
@@ -35,6 +35,7 @@ export function ChatInterface({ user, onLogout }: Props) {
     send,
     refreshProviders,
     dismissReconnect,
+    resetConversation,
   } = useChat();
 
   const [view, setView] = useState<View>("chat");
@@ -94,6 +95,14 @@ export function ChatInterface({ user, onLogout }: Props) {
 
           <div className="flex-1" />
           <span className="text-xs text-gray-400 hidden sm:block">{user.email}</span>
+          <button
+            onClick={() => void resetConversation()}
+            title="New conversation"
+            disabled={isLoading}
+            className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors disabled:opacity-40"
+          >
+            <PenSquare size={16} />
+          </button>
           <button
             onClick={() => void onLogout()}
             title="Sign out"
