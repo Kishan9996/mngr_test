@@ -1,0 +1,100 @@
+"""In-memory session store (Singleton).
+
+Holds per-session conversation history and OAuth tokens.
+In production replace the backing store with Redis using the same interface.
+"""
+
+from __future__ import annotations
+
+import threading
+from datetime import datetime, timedelta
+from typing import Optional
+
+from app.core.exceptions import SessionNotFoundError
+from app.models.appointment import CalendarTokens
+from app.models.chat import SessionData
+
+
+class SessionStore:
+    """Thread-safe, in-memory session repository (Singleton pattern)."""
+
+    _instance: Optional["SessionStore"] = None
+    _lock: threading.Lock = threading.Lock()
+
+    def __new__(cls) -> "SessionStore":
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    inst = super().__new__(cls)
+                    inst._sessions: dict[str, SessionData] = {}
+                    inst._sessions_lock = threading.Lock()
+                    cls._instance = inst
+        return cls._instance
+
+    # ── CRUD ──────────────────────────────────────────────────────────────────
+
+    def get_or_create(self, session_id: str) -> SessionData:
+        with self._sessions_lock:
+            if session_id not in self._sessions:
+                self._sessions[session_id] = SessionData(session_id=session_id)
+            session = self._sessions[session_id]
+            session.last_active = datetime.utcnow()
+            return session
+
+    def get(self, session_id: str) -> SessionData:
+        with self._sessions_lock:
+            session = self._sessions.get(session_id)
+            if session is None:
+                raise SessionNotFoundError(session_id)
+            session.last_active = datetime.utcnow()
+            return session
+
+    def save_tokens(self, session_id: str, tokens: CalendarTokens) -> None:
+        session = self.get_or_create(session_id)
+        with self._sessions_lock:
+            session.calendar_tokens[tokens.provider] = tokens
+
+    def get_tokens(self, session_id: str, provider: str) -> Optional[CalendarTokens]:
+        try:
+            session = self.get(session_id)
+        except SessionNotFoundError:
+            return None
+        return session.calendar_tokens.get(provider)
+
+    def remove_tokens(self, session_id: str, provider: str) -> None:
+        try:
+            session = self.get(session_id)
+        except SessionNotFoundError:
+            return
+        with self._sessions_lock:
+            session.calendar_tokens.pop(provider, None)
+
+    def connected_providers(self, session_id: str) -> list[str]:
+        try:
+            session = self.get(session_id)
+        except SessionNotFoundError:
+            return []
+        return list(session.calendar_tokens.keys())
+
+    def append_message(self, session_id: str, message: dict) -> None:
+        session = self.get_or_create(session_id)
+        with self._sessions_lock:
+            session.conversation_history.append(message)
+
+    def set_timezone(self, session_id: str, timezone: str) -> None:
+        session = self.get_or_create(session_id)
+        with self._sessions_lock:
+            session.timezone = timezone
+
+    def evict_stale(self, max_age_hours: int = 24) -> int:
+        """Remove sessions inactive for more than `max_age_hours`. Returns count."""
+        cutoff = datetime.utcnow() - timedelta(hours=max_age_hours)
+        with self._sessions_lock:
+            stale = [
+                sid
+                for sid, s in self._sessions.items()
+                if s.last_active < cutoff
+            ]
+            for sid in stale:
+                del self._sessions[sid]
+        return len(stale)
