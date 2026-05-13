@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import sqlalchemy, passlib, jose, fastapi, anthropic; print\\('All core packages OK'\\)\")",
+      "Bash(python3 -c \"import sqlalchemy, passlib, jose, fastapi, anthropic; print\\('All core packages OK'\\)\")"
+    ]
+  }
+}

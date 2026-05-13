@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Send, Calendar } from "lucide-react";
+import { Calendar, LogOut, Send } from "lucide-react";
 import { useChat } from "@/hooks/useChat";
+import type { StoredUser } from "@/lib/auth";
 import { CalendarConnect } from "./CalendarConnect";
 import { ChatMessage } from "./ChatMessage";
 import { TypingIndicator } from "./TypingIndicator";
@@ -13,21 +14,26 @@ const QUICK_PROMPTS = [
   "Find a free slot on Friday",
 ];
 
-export function ChatInterface() {
+interface Props {
+  user: StoredUser;
+  onLogout: () => void;
+}
+
+export function ChatInterface({ user, onLogout }: Props) {
   const {
     sessionId,
     messages,
     isLoading,
     connectedProviders,
+    needsReconnect,
     send,
     refreshProviders,
+    dismissReconnect,
   } = useChat();
 
   const [input, setInput] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Auto-scroll to the latest message
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isLoading]);
@@ -48,20 +54,26 @@ export function ChatInterface() {
 
   return (
     <div className="flex h-screen bg-gray-50">
-      {/* ── Main chat area ────────────────────────────────────────────── */}
+      {/* ── Chat area ─────────────────────────────────────────────────── */}
       <div className="flex flex-1 flex-col min-w-0">
         {/* Header */}
         <header className="flex items-center gap-3 border-b border-gray-200 bg-white px-6 py-4 shadow-sm">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-600 text-white">
             <Calendar size={20} />
           </div>
-          <div>
-            <h1 className="text-base font-semibold text-gray-900">
-              AI Scheduling Assistant
-            </h1>
-            <p className="text-xs text-gray-500">
-              Powered by Claude · Book appointments in seconds
-            </p>
+          <div className="flex-1">
+            <h1 className="text-base font-semibold text-gray-900">AI Scheduling Assistant</h1>
+            <p className="text-xs text-gray-500">Powered by Claude</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-gray-400 hidden sm:block">{user.email}</span>
+            <button
+              onClick={onLogout}
+              title="Sign out"
+              className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors"
+            >
+              <LogOut size={16} />
+            </button>
           </div>
         </header>
 
@@ -74,7 +86,7 @@ export function ChatInterface() {
           <div ref={bottomRef} />
         </div>
 
-        {/* Quick prompts (only shown when chat is empty beyond greeting) */}
+        {/* Quick prompts */}
         {messages.length === 1 && !isLoading && (
           <div className="flex flex-wrap gap-2 px-6 pb-2">
             {QUICK_PROMPTS.map((p) => (
@@ -89,16 +101,15 @@ export function ChatInterface() {
           </div>
         )}
 
-        {/* Input area */}
+        {/* Input */}
         <div className="border-t border-gray-200 bg-white px-6 py-4">
           <div className="flex items-end gap-3 rounded-2xl border border-gray-300 bg-gray-50 px-4 py-3 focus-within:border-brand-500 focus-within:ring-2 focus-within:ring-brand-100 transition-all">
             <textarea
-              ref={inputRef}
               rows={1}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Type a message… (Enter to send, Shift+Enter for new line)"
+              placeholder="Type a message… (Enter to send)"
               className="flex-1 resize-none bg-transparent text-sm text-gray-800 placeholder-gray-400 outline-none max-h-32"
               disabled={isLoading}
             />
@@ -111,7 +122,7 @@ export function ChatInterface() {
             </button>
           </div>
           <p className="mt-1.5 text-center text-[11px] text-gray-400">
-            AI can make mistakes — always verify your appointment details.
+            AI can make mistakes — verify appointment details before relying on them.
           </p>
         </div>
       </div>
@@ -121,10 +132,11 @@ export function ChatInterface() {
         <CalendarConnect
           sessionId={sessionId}
           connectedProviders={connectedProviders}
+          needsReconnect={needsReconnect}
           onProviderChange={refreshProviders}
+          onDismissReconnect={dismissReconnect}
         />
 
-        {/* Tips */}
         <div className="rounded-xl bg-brand-50 border border-brand-100 p-4">
           <p className="text-xs font-semibold text-brand-700 mb-2">Tips</p>
           <ul className="space-y-1.5 text-xs text-brand-600 list-disc list-inside">
@@ -135,12 +147,9 @@ export function ChatInterface() {
           </ul>
         </div>
 
-        {/* Session info (dev aid) */}
         {process.env.NODE_ENV === "development" && sessionId && (
           <div className="rounded-lg bg-gray-100 p-3">
-            <p className="text-[10px] font-mono text-gray-500 break-all">
-              Session: {sessionId}
-            </p>
+            <p className="text-[10px] font-mono text-gray-500 break-all">Session: {sessionId}</p>
           </div>
         )}
       </aside>

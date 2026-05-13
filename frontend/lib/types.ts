@@ -5,6 +5,21 @@ export interface Message {
   timestamp: Date;
 }
 
+// ── Auth ──────────────────────────────────────────────────────────────────────
+
+export interface AuthResponse {
+  token: string;
+  user_id: string;
+  email: string;
+}
+
+export interface UserPayload {
+  user_id: string;
+  email: string;
+}
+
+// ── Chat ──────────────────────────────────────────────────────────────────────
+
 export interface ChatMessageRequest {
   session_id: string;
   message: string;
@@ -15,6 +30,7 @@ export interface ChatMessageResponse {
   session_id: string;
   response: string;
   connected_providers: string[];
+  needs_reconnect_providers: string[];
 }
 
 export interface CalendarStatusResponse {
@@ -23,9 +39,3 @@ export interface CalendarStatusResponse {
 }
 
 export type CalendarProvider = "google" | "outlook";
-
-export interface ConnectedCalendar {
-  provider: CalendarProvider;
-  label: string;
-  icon: string;
-}
