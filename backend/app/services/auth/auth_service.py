@@ -10,16 +10,13 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+import bcrypt as _bcrypt
 from jose import JWTError, jwt
-from passlib.context import CryptContext
-from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.models.chat import AuthResponse, UserPayload
 from app.models.db import User
-
-_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 _ALGORITHM = "HS256"
 
@@ -86,8 +83,8 @@ class AuthService:
 
     @staticmethod
     def _hash(password: str) -> str:
-        return _pwd_context.hash(password)
+        return _bcrypt.hashpw(password.encode(), _bcrypt.gensalt()).decode()
 
     @staticmethod
     def _verify(plain: str, hashed: str) -> bool:
-        return _pwd_context.verify(plain, hashed)
+        return _bcrypt.checkpw(plain.encode(), hashed.encode())

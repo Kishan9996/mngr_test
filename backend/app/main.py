@@ -9,7 +9,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api.routes import auth, calendar, chat
+from app.api.routes import auth, calendar, chat, profile
 from app.core.config import get_settings
 from app.core.database import init_db
 from app.core.exceptions import AppError
@@ -47,6 +47,7 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
 app.include_router(calendar.router, prefix="/api")
+app.include_router(profile.router, prefix="/api")
 
 # ── Global exception handlers ─────────────────────────────────────────────────
 @app.exception_handler(AppError)

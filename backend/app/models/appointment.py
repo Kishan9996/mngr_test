@@ -63,6 +63,30 @@ class CreatedEvent:
 
 
 @dataclass
+class CalendarInfo:
+    """A calendar the user has access to."""
+    calendar_id: str
+    name: str
+    provider: str
+    is_primary: bool = False
+
+
+@dataclass
+class CalendarEventItem:
+    """A single event returned for the bookings list view."""
+    event_id: str
+    title: str
+    start: datetime        # UTC
+    end: datetime          # UTC
+    timezone: str
+    calendar_name: str
+    calendar_id: str
+    provider: str
+    html_link: str
+    is_all_day: bool = False
+
+
+@dataclass
 class CalendarTokens:
     """OAuth token bundle stored per provider in a session."""
 

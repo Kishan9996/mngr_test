@@ -45,6 +45,16 @@ class AIServiceError(AppError):
         super().__init__(f"AI service error: {message}", status_code=503)
 
 
+class PastBookingError(AppError):
+    """Raised when the requested appointment start is in the past."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "That time has already passed. Please choose a future date and time.",
+            status_code=400,
+        )
+
+
 class UnsupportedProviderError(AppError):
     """Raised when an unknown calendar provider is requested."""
 

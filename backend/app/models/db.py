@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from typing import Optional
+
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -20,6 +22,7 @@ class User(Base):
 
     sessions: Mapped[list["UserSession"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     calendar_tokens: Mapped[list["CalendarTokenRecord"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    profile: Mapped[Optional["UserProfile"]] = relationship(back_populates="user", cascade="all, delete-orphan", uselist=False)
 
 
 class UserSession(Base):
@@ -48,6 +51,19 @@ class ConversationMessage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
     session: Mapped["UserSession"] = relationship(back_populates="messages")
+
+
+class UserProfile(Base):
+    __tablename__ = "user_profiles"
+
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), primary_key=True)
+    work_start: Mapped[str] = mapped_column(String(5), default="09:00", nullable=False)
+    work_end: Mapped[str] = mapped_column(String(5), default="17:00", nullable=False)
+    default_duration_minutes: Mapped[int] = mapped_column(Integer, default=60, nullable=False)
+    timezone: Mapped[str] = mapped_column(String(64), default="UTC", nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    user: Mapped["User"] = relationship(back_populates="profile")
 
 
 class CalendarTokenRecord(Base):

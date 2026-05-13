@@ -16,7 +16,7 @@ _settings = get_settings()
 engine = create_engine(
     _settings.database_url,
     connect_args={"check_same_thread": False},  # needed for SQLite
-    echo=_settings.app_env == "development",
+    echo=False,
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

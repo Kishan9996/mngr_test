@@ -79,6 +79,38 @@ export function getCalendarAuthUrl(provider: string, sessionId: string): string 
   return `${API_URL}/api/calendar/auth/${provider}?session_id=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(token ?? "")}`;
 }
 
+export async function getProfile(): Promise<import("./types").UserProfile> {
+  const res = await fetch(`${API_URL}/api/profile`, { headers: authHeaders() });
+  return handleResponse<import("./types").UserProfile>(res);
+}
+
+export async function updateProfile(
+  patch: Partial<import("./types").UserProfile>
+): Promise<import("./types").UserProfile> {
+  const res = await fetch(`${API_URL}/api/profile`, {
+    method: "PATCH",
+    headers: authHeaders(),
+    body: JSON.stringify(patch),
+  });
+  return handleResponse<import("./types").UserProfile>(res);
+}
+
+export async function getCalendarEvents(
+  sessionId: string,
+  daysAhead = 30,
+  timezone = Intl.DateTimeFormat().resolvedOptions().timeZone
+): Promise<import("./types").CalendarEventsResponse> {
+  const params = new URLSearchParams({
+    session_id: sessionId,
+    days_ahead: String(daysAhead),
+    timezone,
+  });
+  const res = await fetch(`${API_URL}/api/calendar/events?${params}`, {
+    headers: authHeaders(),
+  });
+  return handleResponse<import("./types").CalendarEventsResponse>(res);
+}
+
 export async function disconnectCalendar(provider: string, sessionId: string): Promise<void> {
   await fetch(
     `${API_URL}/api/calendar/disconnect/${provider}?session_id=${encodeURIComponent(sessionId)}`,
