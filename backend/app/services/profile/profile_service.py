@@ -16,6 +16,7 @@ _DEFAULTS = dict(
     work_end="17:00",
     default_duration_minutes=60,
     timezone="UTC",
+    onboarding_completed=False,
 )
 
 
@@ -53,4 +54,5 @@ class ProfileService:
             work_end=profile.work_end,
             default_duration_minutes=profile.default_duration_minutes,
             timezone=profile.timezone,
+            onboarding_completed=profile.onboarding_completed,
         )

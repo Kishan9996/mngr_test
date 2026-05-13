@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Calendar, CalendarDays, LogOut, MessageSquare, Send } from "lucide-react";
+import { Calendar, CalendarDays, Loader2, LogOut, MessageSquare, Send } from "lucide-react";
 import { useChat } from "@/hooks/useChat";
 import type { StoredUser } from "@/lib/auth";
 import { BookingsView } from "./BookingsView";
@@ -11,9 +11,10 @@ import { ProfilePanel } from "./ProfilePanel";
 import { TypingIndicator } from "./TypingIndicator";
 
 const QUICK_PROMPTS = [
-  "Schedule a 30-min meeting tomorrow",
-  "Book a 1-hour call this week",
-  "Find a free slot on Friday",
+  "Team standup — 30 min, next 2 days",
+  "1-hour client call this week",
+  "Quick 15-min check-in tomorrow",
+  "Book a recurring Monday meeting",
 ];
 
 type View = "chat" | "bookings";
@@ -28,6 +29,7 @@ export function ChatInterface({ user, onLogout }: Props) {
     sessionId,
     messages,
     isLoading,
+    historyLoading,
     connectedProviders,
     needsReconnect,
     send,
@@ -93,7 +95,7 @@ export function ChatInterface({ user, onLogout }: Props) {
           <div className="flex-1" />
           <span className="text-xs text-gray-400 hidden sm:block">{user.email}</span>
           <button
-            onClick={onLogout}
+            onClick={() => void onLogout()}
             title="Sign out"
             className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors"
           >
@@ -105,9 +107,20 @@ export function ChatInterface({ user, onLogout }: Props) {
         {view === "chat" && (
           <>
             <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4">
-              {messages.map((msg) => (
-                <ChatMessage key={msg.id} message={msg} />
-              ))}
+              {historyLoading ? (
+                <div className="flex flex-col items-center justify-center gap-2 py-16 text-gray-400">
+                  <Loader2 size={20} className="animate-spin" />
+                  <p className="text-xs">Loading your conversation…</p>
+                </div>
+              ) : (
+                messages.map((msg) => (
+                  <ChatMessage
+                    key={msg.id}
+                    message={msg}
+                    onOptionSelect={!isLoading ? send : undefined}
+                  />
+                ))
+              )}
               {isLoading && <TypingIndicator />}
               <div ref={bottomRef} />
             </div>

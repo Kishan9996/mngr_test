@@ -49,10 +49,17 @@ class SessionStore(AbstractSessionStore):
             session.last_active = datetime.utcnow()
             return session
 
+    def get_or_create_for_user(self, user_id: str) -> str:
+        """In-memory: use user_id itself as the session_id (simpler for tests)."""
+        self.get_or_create(user_id)
+        return user_id
+
     def link_session_to_user(self, session_id: str, user_id: str) -> None:
-        """No-op for in-memory store — no user concept needed in tests."""
         session = self.get_or_create(session_id)
         with self._sessions_lock:
+            if session.user_id and session.user_id != user_id:
+                from app.core.exceptions import AppError
+                raise AppError("Session belongs to a different user.", status_code=403)
             session.user_id = user_id
 
     def save_tokens(self, session_id: str, tokens: CalendarTokens) -> None:

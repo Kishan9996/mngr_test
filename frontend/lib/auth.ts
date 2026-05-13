@@ -1,33 +1,22 @@
 "use client";
 
-const TOKEN_KEY = "ai_calendar_token";
-const USER_KEY = "ai_calendar_user";
+// The JWT lives in an httpOnly cookie — the browser manages it automatically.
+// We only keep non-secret display info (user_id, email) and the
+// server-assigned session_id in localStorage.
+
+export const USER_KEY = "ai_calendar_user";
+export const SESSION_KEY = "ai_calendar_session_id";
 
 export interface StoredUser {
   user_id: string;
   email: string;
 }
 
-export function getToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem(TOKEN_KEY);
-}
-
-export function setToken(token: string): void {
-  localStorage.setItem(TOKEN_KEY, token);
-}
-
-export function clearToken(): void {
-  localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(USER_KEY);
-}
-
 export function getStoredUser(): StoredUser | null {
   if (typeof window === "undefined") return null;
-  const raw = localStorage.getItem(USER_KEY);
-  if (!raw) return null;
   try {
-    return JSON.parse(raw) as StoredUser;
+    const raw = localStorage.getItem(USER_KEY);
+    return raw ? (JSON.parse(raw) as StoredUser) : null;
   } catch {
     return null;
   }
@@ -35,4 +24,18 @@ export function getStoredUser(): StoredUser | null {
 
 export function setStoredUser(user: StoredUser): void {
   localStorage.setItem(USER_KEY, JSON.stringify(user));
+}
+
+export function getStoredSessionId(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(SESSION_KEY);
+}
+
+export function setStoredSessionId(sessionId: string): void {
+  localStorage.setItem(SESSION_KEY, sessionId);
+}
+
+export function clearSession(): void {
+  localStorage.removeItem(USER_KEY);
+  localStorage.removeItem(SESSION_KEY);
 }

@@ -16,8 +16,10 @@ from sqlalchemy import select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
+import uuid
+
 from app.core.database import SessionLocal
-from app.core.exceptions import SessionNotFoundError
+from app.core.exceptions import AppError, SessionNotFoundError
 from app.models.appointment import CalendarTokens
 from app.models.chat import SessionData
 from app.models.db import CalendarTokenRecord, ConversationMessage, UserSession
@@ -51,14 +53,43 @@ class DBSessionStore(AbstractSessionStore):
             db.commit()
             return self._build_session_data(db, record)
 
+    def get_or_create_for_user(self, user_id: str) -> str:
+        """Return this user's canonical session_id, creating one if they have none.
+
+        One user always maps to the same session so that history and tokens
+        are isolated per account across all browsers and devices.
+        """
+        with SessionLocal() as db:
+            record = db.scalar(
+                select(UserSession)
+                .where(UserSession.user_id == user_id)
+                .order_by(UserSession.last_active.desc())
+            )
+            if record:
+                record.last_active = datetime.utcnow()
+                db.commit()
+                return record.session_id
+            # First login for this user — create their canonical session
+            session_id = str(uuid.uuid4())
+            db.add(UserSession(session_id=session_id, user_id=user_id))
+            db.commit()
+            logger.info("Created canonical session %s for user %s", session_id, user_id)
+            return session_id
+
     def link_session_to_user(self, session_id: str, user_id: str) -> None:
-        """Create or update the UserSession row linking this session to a user."""
+        """Bind a session to a user. Hard-fails if the session already belongs
+        to a *different* user — prevents cross-user data leakage."""
         with SessionLocal() as db:
             record = db.get(UserSession, session_id)
             if record is None:
-                record = UserSession(session_id=session_id, user_id=user_id)
-                db.add(record)
-                logger.info("Created session %s for user %s", session_id, user_id)
+                db.add(UserSession(session_id=session_id, user_id=user_id))
+                logger.info("Linked session %s → user %s", session_id, user_id)
+            elif record.user_id != user_id:
+                logger.error(
+                    "Session hijack attempt: session %s belongs to user %s, "
+                    "not %s", session_id, record.user_id, user_id,
+                )
+                raise AppError("Invalid session for this account.", status_code=403)
             else:
                 record.last_active = datetime.utcnow()
             db.commit()

@@ -29,6 +29,7 @@ from app.models.appointment import (
     TimeRange,
 )
 from app.services.calendar.base import CalendarProvider
+from app.utils.cache import calendar_list_cache
 from app.utils.retry import with_retry
 
 logger = logging.getLogger(__name__)
@@ -74,20 +75,28 @@ class GoogleCalendarProvider(CalendarProvider):
     @with_retry(max_attempts=3, backoff_base=1.0, retryable=(HttpError, ConnectionError, TimeoutError))
     def list_calendars(self) -> list[CalendarInfo]:
         self._ensure_tokens()
+        cache_key = f"google:calendars:{self._tokens.access_token[:16]}"
+        cached = calendar_list_cache.get(cache_key)
+        if cached is not None:
+            return [CalendarInfo(**item) for item in cached]
+
         service = self._build_service()
         try:
             result = service.calendarList().list(minAccessRole="reader").execute()
         except HttpError as exc:
             raise CalendarAPIError("google", str(exc)) from exc
 
-        calendars = []
-        for item in result.get("items", []):
-            calendars.append(CalendarInfo(
+        calendars = [
+            CalendarInfo(
                 calendar_id=item["id"],
                 name=item.get("summary", item["id"]),
                 provider="google",
                 is_primary=item.get("primary", False),
-            ))
+            )
+            for item in result.get("items", [])
+        ]
+        import dataclasses
+        calendar_list_cache.set(cache_key, [dataclasses.asdict(c) for c in calendars])
         return calendars
 
     # ── Multi-calendar: upcoming events ───────────────────────────────────────
@@ -191,6 +200,8 @@ class GoogleCalendarProvider(CalendarProvider):
         }
         if event.attendees:
             body["attendees"] = [{"email": e} for e in event.attendees]
+        if event.recurrence:
+            body["recurrence"] = [event.recurrence]
 
         try:
             created = service.events().insert(calendarId="primary", body=body).execute()
@@ -265,6 +276,12 @@ class GoogleCalendarProvider(CalendarProvider):
             start = datetime.fromisoformat(raw_start.replace("Z", "+00:00")).astimezone(pytz.UTC)
             end = datetime.fromisoformat(raw_end.replace("Z", "+00:00")).astimezone(pytz.UTC)
 
+        attendees = [
+            a.get("displayName") or a.get("email", "")
+            for a in item.get("attendees", [])
+            if a.get("email") and not a.get("self")  # exclude the calendar owner
+        ]
+
         return CalendarEventItem(
             event_id=item["id"],
             title=item.get("summary", "(No title)"),
@@ -276,4 +293,7 @@ class GoogleCalendarProvider(CalendarProvider):
             provider="google",
             html_link=item.get("htmlLink", ""),
             is_all_day=is_all_day,
+            is_recurring=bool(item.get("recurringEventId") or item.get("recurrence")),
+            description=item.get("description", "").strip(),
+            attendees=attendees,
         )

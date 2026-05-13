@@ -47,6 +47,8 @@ class CalendarEvent:
     timezone: str = "UTC"
     description: str = ""
     attendees: list[str] = field(default_factory=list)
+    # Optional RRULE string e.g. "RRULE:FREQ=WEEKLY;BYDAY=MO"
+    recurrence: str = ""
 
 
 @dataclass
@@ -84,6 +86,9 @@ class CalendarEventItem:
     provider: str
     html_link: str
     is_all_day: bool = False
+    is_recurring: bool = False
+    description: str = ""
+    attendees: list[str] = field(default_factory=list)
 
 
 @dataclass
