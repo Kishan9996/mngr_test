@@ -13,9 +13,9 @@ export function useChat() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [connectedProviders, setConnectedProviders] = useState<string[]>([]);
+  const [needsReconnect, setNeedsReconnect] = useState<string[]>([]);
   const initialised = useRef(false);
 
-  // Initialise session ID (persist across page reloads)
   useEffect(() => {
     if (initialised.current) return;
     initialised.current = true;
@@ -25,28 +25,23 @@ export function useChat() {
     if (!existing) localStorage.setItem(SESSION_KEY, id);
     setSessionId(id);
 
-    // Warm up the conversation with a greeting
-    const greeting: Message = {
+    setMessages([{
       id: uuidv4(),
       role: "assistant",
       content:
         "Hello! I'm your AI scheduling assistant. I can help you book appointments on your Google Calendar or Outlook. What would you like to schedule today?",
       timestamp: new Date(),
-    };
-    setMessages([greeting]);
+    }]);
   }, []);
 
   const send = useCallback(
     async (text: string) => {
       if (!text.trim() || !sessionId) return;
 
-      const userMsg: Message = {
-        id: uuidv4(),
-        role: "user",
-        content: text.trim(),
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, userMsg]);
+      setMessages((prev) => [
+        ...prev,
+        { id: uuidv4(), role: "user", content: text.trim(), timestamp: new Date() },
+      ]);
       setIsLoading(true);
       setError(null);
 
@@ -54,24 +49,27 @@ export function useChat() {
         const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
         const data = await sendMessage(sessionId, text.trim(), timezone);
 
-        const assistantMsg: Message = {
-          id: uuidv4(),
-          role: "assistant",
-          content: data.response,
-          timestamp: new Date(),
-        };
-        setMessages((prev) => [...prev, assistantMsg]);
+        setMessages((prev) => [
+          ...prev,
+          { id: uuidv4(), role: "assistant", content: data.response, timestamp: new Date() },
+        ]);
         setConnectedProviders(data.connected_providers);
+        // Surface any providers whose tokens expired during the tool loop
+        if (data.needs_reconnect_providers.length > 0) {
+          setNeedsReconnect(data.needs_reconnect_providers);
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Something went wrong.";
         setError(msg);
-        const errorMsg: Message = {
-          id: uuidv4(),
-          role: "assistant",
-          content: `Sorry, I ran into an error: ${msg}. Please try again.`,
-          timestamp: new Date(),
-        };
-        setMessages((prev) => [...prev, errorMsg]);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: uuidv4(),
+            role: "assistant",
+            content: `Sorry, I ran into an error: ${msg}. Please try again.`,
+            timestamp: new Date(),
+          },
+        ]);
       } finally {
         setIsLoading(false);
       }
@@ -81,6 +79,12 @@ export function useChat() {
 
   const refreshProviders = useCallback((providers: string[]) => {
     setConnectedProviders(providers);
+    // Clear reconnect flags for providers that are now connected
+    setNeedsReconnect((prev) => prev.filter((p) => !providers.includes(p)));
+  }, []);
+
+  const dismissReconnect = useCallback((provider: string) => {
+    setNeedsReconnect((prev) => prev.filter((p) => p !== provider));
   }, []);
 
   return {
@@ -89,7 +93,9 @@ export function useChat() {
     isLoading,
     error,
     connectedProviders,
+    needsReconnect,
     send,
     refreshProviders,
+    dismissReconnect,
   };
 }

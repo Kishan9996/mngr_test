@@ -4,11 +4,16 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.api.deps import get_ai_service, get_session_store
+from app.api.deps import get_ai_service, get_current_user, get_session_store
 from app.core.exceptions import AIServiceError, AppError
-from app.models.chat import CalendarStatusResponse, ChatMessageRequest, ChatMessageResponse
+from app.models.chat import (
+    CalendarStatusResponse,
+    ChatMessageRequest,
+    ChatMessageResponse,
+    UserPayload,
+)
 from app.services.ai.claude_service import ClaudeAIService
-from app.services.session.session_store import SessionStore
+from app.services.session.abstract_store import AbstractSessionStore
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 logger = logging.getLogger(__name__)
@@ -17,12 +22,16 @@ logger = logging.getLogger(__name__)
 @router.post("/message", response_model=ChatMessageResponse)
 def send_message(
     body: ChatMessageRequest,
+    current_user: UserPayload = Depends(get_current_user),
     ai_service: ClaudeAIService = Depends(get_ai_service),
-    store: SessionStore = Depends(get_session_store),
+    store: AbstractSessionStore = Depends(get_session_store),
 ) -> ChatMessageResponse:
     """Send a user message and receive the AI assistant's reply."""
+    # Bind this session to the authenticated user (idempotent)
+    store.link_session_to_user(body.session_id, current_user.user_id)
+
     try:
-        reply = ai_service.process_message(
+        result = ai_service.process_message(
             session_id=body.session_id,
             user_message=body.message,
             timezone=body.timezone,
@@ -32,22 +41,24 @@ def send_message(
         raise HTTPException(status_code=503, detail=exc.message)
     except AppError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message)
-    except Exception as exc:
+    except Exception:
         logger.exception("Unexpected error processing message")
         raise HTTPException(status_code=500, detail="Internal server error")
 
     connected = store.connected_providers(body.session_id)
     return ChatMessageResponse(
         session_id=body.session_id,
-        response=reply,
+        response=result.text,
         connected_providers=connected,
+        needs_reconnect_providers=result.needs_reconnect_providers,
     )
 
 
 @router.get("/status", response_model=CalendarStatusResponse)
 def get_status(
     session_id: str,
-    store: SessionStore = Depends(get_session_store),
+    current_user: UserPayload = Depends(get_current_user),
+    store: AbstractSessionStore = Depends(get_session_store),
 ) -> CalendarStatusResponse:
     """Return which calendar providers are connected for this session."""
     connected = store.connected_providers(session_id)

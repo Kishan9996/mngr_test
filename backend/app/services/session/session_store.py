@@ -1,7 +1,6 @@
-"""In-memory session store (Singleton).
+"""In-memory session store (Singleton) — used in tests and as fallback.
 
-Holds per-session conversation history and OAuth tokens.
-In production replace the backing store with Redis using the same interface.
+In production, DBSessionStore is wired in via deps.py.
 """
 
 from __future__ import annotations
@@ -13,10 +12,11 @@ from typing import Optional
 from app.core.exceptions import SessionNotFoundError
 from app.models.appointment import CalendarTokens
 from app.models.chat import SessionData
+from app.services.session.abstract_store import AbstractSessionStore
 
 
-class SessionStore:
-    """Thread-safe, in-memory session repository (Singleton pattern)."""
+class SessionStore(AbstractSessionStore):
+    """Thread-safe, in-memory implementation (Singleton pattern)."""
 
     _instance: Optional["SessionStore"] = None
     _lock: threading.Lock = threading.Lock()
@@ -31,7 +31,7 @@ class SessionStore:
                     cls._instance = inst
         return cls._instance
 
-    # ── CRUD ──────────────────────────────────────────────────────────────────
+    # ── AbstractSessionStore implementation ───────────────────────────────────
 
     def get_or_create(self, session_id: str) -> SessionData:
         with self._sessions_lock:
@@ -48,6 +48,12 @@ class SessionStore:
                 raise SessionNotFoundError(session_id)
             session.last_active = datetime.utcnow()
             return session
+
+    def link_session_to_user(self, session_id: str, user_id: str) -> None:
+        """No-op for in-memory store — no user concept needed in tests."""
+        session = self.get_or_create(session_id)
+        with self._sessions_lock:
+            session.user_id = user_id
 
     def save_tokens(self, session_id: str, tokens: CalendarTokens) -> None:
         session = self.get_or_create(session_id)
@@ -86,15 +92,12 @@ class SessionStore:
         with self._sessions_lock:
             session.timezone = timezone
 
+    # ── Maintenance ────────────────────────────────────────────────────────────
+
     def evict_stale(self, max_age_hours: int = 24) -> int:
-        """Remove sessions inactive for more than `max_age_hours`. Returns count."""
         cutoff = datetime.utcnow() - timedelta(hours=max_age_hours)
         with self._sessions_lock:
-            stale = [
-                sid
-                for sid, s in self._sessions.items()
-                if s.last_active < cutoff
-            ]
+            stale = [sid for sid, s in self._sessions.items() if s.last_active < cutoff]
             for sid in stale:
                 del self._sessions[sid]
         return len(stale)
