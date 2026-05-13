@@ -18,6 +18,7 @@ import pytz
 
 from app.core.config import get_settings
 from app.core.exceptions import CalendarAPIError, CalendarAuthError
+from app.utils.retry import with_retry
 from app.models.appointment import (
     CalendarEvent,
     CalendarTokens,
@@ -77,6 +78,7 @@ class OutlookCalendarProvider(CalendarProvider):
 
     # ── Strategy implementation ────────────────────────────────────────────────
 
+    @with_retry(max_attempts=3, backoff_base=1.0, retryable=(httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException, ConnectionError))
     def get_busy_times(
         self, start: date, end: date, timezone: str
     ) -> list[TimeRange]:
@@ -115,6 +117,7 @@ class OutlookCalendarProvider(CalendarProvider):
                 )
         return busy
 
+    @with_retry(max_attempts=3, backoff_base=1.0, retryable=(httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException, ConnectionError))
     def create_event(self, event: CalendarEvent) -> CreatedEvent:
         self._ensure_tokens()
         tz_obj = pytz.timezone(event.timezone)

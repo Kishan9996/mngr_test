@@ -34,6 +34,13 @@ class Settings(BaseSettings):
     default_slot_duration_minutes: int = 60
     default_timezone: str = "UTC"
 
+    # Auth
+    jwt_secret: str = "change-me-in-production-use-a-long-random-string"
+    jwt_expire_days: int = 30
+
+    # Database
+    database_url: str = "sqlite:///./chatbot.db"
+
     # CORS
     cors_origins: list[str] = ["http://localhost:3000"]
 

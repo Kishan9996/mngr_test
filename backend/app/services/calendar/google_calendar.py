@@ -20,6 +20,7 @@ from googleapiclient.errors import HttpError
 
 from app.core.config import get_settings
 from app.core.exceptions import CalendarAPIError, CalendarAuthError
+from app.utils.retry import with_retry
 from app.models.appointment import (
     CalendarEvent,
     CalendarTokens,
@@ -69,6 +70,7 @@ class GoogleCalendarProvider(CalendarProvider):
 
     # ── Strategy implementation ────────────────────────────────────────────────
 
+    @with_retry(max_attempts=3, backoff_base=1.0, retryable=(HttpError, ConnectionError, TimeoutError))
     def get_busy_times(
         self, start: date, end: date, timezone: str
     ) -> list[TimeRange]:
@@ -103,6 +105,7 @@ class GoogleCalendarProvider(CalendarProvider):
             for period in busy_periods
         ]
 
+    @with_retry(max_attempts=3, backoff_base=1.0, retryable=(HttpError, ConnectionError, TimeoutError))
     def create_event(self, event: CalendarEvent) -> CreatedEvent:
         self._ensure_tokens()
         service = self._build_service()
