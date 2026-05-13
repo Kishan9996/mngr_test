@@ -5,13 +5,7 @@ export interface Message {
   timestamp: Date;
 }
 
-// ── Auth ──────────────────────────────────────────────────────────────────────
-
-export interface AuthResponse {
-  token: string;
-  user_id: string;
-  email: string;
-}
+// ── Auth (JWT lives in httpOnly cookie — only display info sent to frontend) ────
 
 export interface UserPayload {
   user_id: string;
@@ -47,6 +41,7 @@ export interface UserProfile {
   work_end: string;                 // "HH:MM"
   default_duration_minutes: number;
   timezone: string;
+  onboarding_completed: boolean;
 }
 
 // ── Bookings list ─────────────────────────────────────────────────────────────
@@ -57,6 +52,9 @@ export interface CalendarEventItem {
   start: string;       // ISO 8601
   end: string;
   is_all_day: boolean;
+  is_recurring: boolean;
+  description: string;
+  attendees: string[];
   calendar_name: string;
   calendar_id: string;
   provider: CalendarProvider;

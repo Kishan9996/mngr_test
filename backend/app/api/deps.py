@@ -2,7 +2,7 @@
 
 from functools import lru_cache
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, HTTPException, Request
 
 from app.models.chat import UserPayload
 from app.services.ai.claude_service import ClaudeAIService
@@ -11,6 +11,8 @@ from app.services.profile.profile_service import ProfileService
 from app.services.scheduling.scheduler import SchedulingService
 from app.services.session.abstract_store import AbstractSessionStore
 from app.services.session.db_session_store import DBSessionStore
+
+_COOKIE_NAME = "auth_token"
 
 
 @lru_cache
@@ -39,14 +41,14 @@ def get_ai_service() -> ClaudeAIService:
 
 
 def get_current_user(
-    authorization: str = Header(None, alias="Authorization"),
+    request: Request,
     auth_service: AuthService = Depends(get_auth_service),
 ) -> UserPayload:
-    """Extract and validate the Bearer JWT from the Authorization header."""
-    if not authorization or not authorization.startswith("Bearer "):
+    """Read the JWT from the httpOnly cookie and validate it."""
+    token = request.cookies.get(_COOKIE_NAME)
+    if not token:
         raise HTTPException(status_code=401, detail="Not authenticated.")
-    token = authorization[len("Bearer "):]
     try:
         return auth_service.decode_token(token)
     except ValueError as exc:
-        raise HTTPException(status_code=401, detail=str(exc))
+        raise HTTPException(status_code=401, detail="Session expired. Please sign in again.")

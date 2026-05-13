@@ -25,6 +25,7 @@ from app.models.appointment import (
     TimeRange,
 )
 from app.services.calendar.base import CalendarProvider
+from app.utils.cache import calendar_list_cache
 from app.utils.retry import with_retry
 
 logger = logging.getLogger(__name__)
@@ -81,6 +82,11 @@ class OutlookCalendarProvider(CalendarProvider):
     @with_retry(max_attempts=3, backoff_base=1.0, retryable=(httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException, ConnectionError))
     def list_calendars(self) -> list[CalendarInfo]:
         self._ensure_tokens()
+        cache_key = f"outlook:calendars:{self._tokens.access_token[:16]}"
+        cached = calendar_list_cache.get(cache_key)
+        if cached is not None:
+            return [CalendarInfo(**item) for item in cached]
+
         try:
             result = self._graph_get(
                 f"{GRAPH_BASE}/me/calendars",
@@ -89,7 +95,7 @@ class OutlookCalendarProvider(CalendarProvider):
         except httpx.HTTPStatusError as exc:
             raise CalendarAPIError("outlook", str(exc)) from exc
 
-        return [
+        calendars = [
             CalendarInfo(
                 calendar_id=cal["id"],
                 name=cal["name"],
@@ -98,6 +104,9 @@ class OutlookCalendarProvider(CalendarProvider):
             )
             for cal in result.get("value", [])
         ]
+        import dataclasses
+        calendar_list_cache.set(cache_key, [dataclasses.asdict(c) for c in calendars])
+        return calendars
 
     # ── Multi-calendar: upcoming events ───────────────────────────────────────
 
@@ -120,7 +129,7 @@ class OutlookCalendarProvider(CalendarProvider):
                     params={
                         "startDateTime": start_dt,
                         "endDateTime": end_dt,
-                        "$select": "id,subject,start,end,webLink,isAllDay",
+                        "$select": "id,subject,start,end,webLink,isAllDay,type,body,attendees",
                         "$top": "250",
                     },
                 )
@@ -274,6 +283,25 @@ class OutlookCalendarProvider(CalendarProvider):
         is_all_day = item.get("isAllDay", False)
         start = OutlookCalendarProvider._parse_graph_dt(item["start"]["dateTime"])
         end = OutlookCalendarProvider._parse_graph_dt(item["end"]["dateTime"])
+        import re as _re
+
+        event_type = item.get("type", "singleInstance")
+
+        # Extract plain-text description from the body (may be HTML)
+        body = item.get("body", {})
+        raw_body = body.get("content", "")
+        if body.get("contentType", "text") == "html":
+            description = _re.sub(r"<[^>]+>", " ", raw_body)
+            description = _re.sub(r"\s+", " ", description).strip()
+        else:
+            description = raw_body.strip()
+
+        attendees = [
+            a.get("emailAddress", {}).get("name") or a.get("emailAddress", {}).get("address", "")
+            for a in item.get("attendees", [])
+            if a.get("emailAddress", {}).get("address")
+        ]
+
         return CalendarEventItem(
             event_id=item["id"],
             title=item.get("subject", "(No title)"),
@@ -285,4 +313,7 @@ class OutlookCalendarProvider(CalendarProvider):
             provider="outlook",
             html_link=item.get("webLink", ""),
             is_all_day=is_all_day,
+            is_recurring=event_type in ("occurrence", "seriesMaster"),
+            description=description,
+            attendees=attendees,
         )

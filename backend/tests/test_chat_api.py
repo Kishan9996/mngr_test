@@ -84,20 +84,15 @@ class TestCalendarEndpoints:
         assert response.status_code == 400
 
     @patch("app.api.routes.calendar.CalendarProviderFactory.create_unauthenticated")
-    @patch("app.api.routes.calendar.get_auth_service")
-    def test_start_oauth_google_redirects(self, mock_auth_svc, mock_factory, client):
-        from app.models.chat import UserPayload
-        mock_auth = MagicMock()
-        mock_auth.decode_token.return_value = UserPayload(user_id="u1", email="t@t.com")
-        mock_auth_svc.return_value = mock_auth
-
+    def test_start_oauth_google_redirects(self, mock_factory, client):
         mock_provider = MagicMock()
         mock_provider.get_auth_url.return_value = "https://accounts.google.com/oauth?state=test"
         mock_factory.return_value = mock_provider
 
+        # conftest overrides get_current_user; cookie auth is transparent in tests
         response = client.get(
             "/api/calendar/auth/google",
-            params={"session_id": TEST_SESSION_ID, "token": "fake-jwt"},
+            params={"session_id": TEST_SESSION_ID},
             follow_redirects=False,
         )
         assert response.status_code in (302, 307)

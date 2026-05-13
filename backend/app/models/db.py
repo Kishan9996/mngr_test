@@ -6,7 +6,7 @@ from datetime import datetime
 
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -61,6 +61,7 @@ class UserProfile(Base):
     work_end: Mapped[str] = mapped_column(String(5), default="17:00", nullable=False)
     default_duration_minutes: Mapped[int] = mapped_column(Integer, default=60, nullable=False)
     timezone: Mapped[str] = mapped_column(String(64), default="UTC", nullable=False)
+    onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
     user: Mapped["User"] = relationship(back_populates="profile")

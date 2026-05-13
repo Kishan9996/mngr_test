@@ -48,6 +48,7 @@ class UserProfileResponse(BaseModel):
     work_end: str
     default_duration_minutes: int
     timezone: str
+    onboarding_completed: bool
 
 
 class UserProfileUpdate(BaseModel):
@@ -55,6 +56,7 @@ class UserProfileUpdate(BaseModel):
     work_end: str | None = None
     default_duration_minutes: int | None = None
     timezone: str | None = None
+    onboarding_completed: bool | None = None
 
 
 class CalendarStatusResponse(BaseModel):

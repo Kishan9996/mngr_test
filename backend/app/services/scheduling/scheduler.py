@@ -96,6 +96,7 @@ class SchedulingService:
         calendar_provider: str,
         description: str = "",
         attendees: list[str] | None = None,
+        recurrence: str = "",
     ) -> dict:
         tokens = self._require_tokens(session_id, calendar_provider)
         provider = CalendarProviderFactory.create(calendar_provider, tokens)
@@ -123,6 +124,7 @@ class SchedulingService:
             timezone=timezone_str,
             description=description,
             attendees=attendees or [],
+            recurrence=recurrence,
         )
         created = provider.create_event(event)
 

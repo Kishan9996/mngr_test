@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { CalendarDays, ExternalLink, RefreshCw } from "lucide-react";
+import { CalendarDays, ExternalLink, RefreshCw, Repeat2, Users } from "lucide-react";
 import { getCalendarEvents } from "@/lib/api";
 import type { CalendarEventItem } from "@/lib/types";
 
@@ -155,9 +155,17 @@ function EventCard({ event }: { event: CalendarEventItem }) {
       <div className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${style.dot}`} />
 
       {/* Details */}
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-gray-900 truncate">{event.title}</p>
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1">
+      <div className="flex-1 min-w-0 space-y-1">
+        {/* Title row */}
+        <div className="flex items-center gap-1.5">
+          <p className="text-sm font-medium text-gray-900 truncate">{event.title}</p>
+          {event.is_recurring && (
+            <Repeat2 size={12} className="shrink-0 text-gray-400" title="Recurring event" />
+          )}
+        </div>
+
+        {/* Time + provider + calendar */}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span className="text-xs text-gray-500">{timeLabel}</span>
           <span className="text-gray-300 text-xs">·</span>
           <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded border ${style.badge}`}>
@@ -165,6 +173,26 @@ function EventCard({ event }: { event: CalendarEventItem }) {
           </span>
           <span className="text-xs text-gray-400 truncate max-w-[160px]">{event.calendar_name}</span>
         </div>
+
+        {/* Description */}
+        {event.description && (
+          <p className="text-xs text-gray-500 italic leading-snug line-clamp-2">
+            {event.description}
+          </p>
+        )}
+
+        {/* Attendees */}
+        {event.attendees.length > 0 && (
+          <div className="flex items-center gap-1.5">
+            <Users size={11} className="shrink-0 text-gray-400" />
+            <p className="text-xs text-gray-500 truncate">
+              {event.attendees.slice(0, 3).join(", ")}
+              {event.attendees.length > 3 && (
+                <span className="text-gray-400"> +{event.attendees.length - 3} more</span>
+              )}
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Open in calendar */}

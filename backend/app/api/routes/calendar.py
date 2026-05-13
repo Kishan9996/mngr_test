@@ -15,7 +15,7 @@ import pytz
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse, RedirectResponse
 
-from app.api.deps import get_auth_service, get_current_user, get_session_store
+from app.api.deps import get_current_user, get_session_store
 from app.core.config import get_settings
 from app.core.exceptions import AppError
 from app.models.chat import UserPayload
@@ -33,19 +33,14 @@ SUPPORTED = CalendarProviderFactory.supported_providers()
 def start_oauth(
     provider: str,
     session_id: str = Query(..., description="Client session ID"),
-    token: str = Query(..., description="JWT Bearer token (passed in URL since this is a browser redirect)"),
+    current_user: UserPayload = Depends(get_current_user),
     store: AbstractSessionStore = Depends(get_session_store),
-    auth_service=Depends(get_auth_service),
 ) -> RedirectResponse:
-    from app.services.auth.auth_service import AuthService  # local to avoid circular
+    """Redirect the browser to the provider's OAuth consent page.
 
-    try:
-        current_user = auth_service.decode_token(token)
-    except ValueError as exc:
-        raise HTTPException(status_code=401, detail=str(exc))
-    """Redirect the browser to the provider's OAuth consent page."""
+    The auth cookie is sent automatically by the browser, so no token param needed.
+    """
     _check_provider(provider)
-    # Ensure the session is linked to this user before the callback fires
     store.link_session_to_user(session_id, current_user.user_id)
     p = CalendarProviderFactory.create_unauthenticated(provider)
     url = p.get_auth_url(state=session_id)
@@ -147,6 +142,9 @@ def get_events(
                 "start": e.start.isoformat(),
                 "end": e.end.isoformat(),
                 "is_all_day": e.is_all_day,
+                "is_recurring": e.is_recurring,
+                "description": e.description,
+                "attendees": e.attendees,
                 "calendar_name": e.calendar_name,
                 "calendar_id": e.calendar_id,
                 "provider": e.provider,
