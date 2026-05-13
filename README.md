@@ -1,3 +1,18 @@
+# MNGR — AI Chatbot Projects
+
+This repository contains two independent AI chatbot projects built for the MNGR take-home assessment.
+
+| Project | Folder | Port | Description |
+|---------|--------|------|-------------|
+| **AI Calendar Scheduling Chatbot** | `backend/` + `frontend/` | 8000 / 3000 | Natural-language appointment booking via Google Calendar & Outlook |
+| **AI Data Extraction Chatbot** | `data_extraction_backend/` + `data_extraction_frontend/` | 8001 / 3001 | Natural-language querying of ecommerce and support data, multi-tenant |
+
+Each project has its own README with full setup instructions:
+- Calendar Chatbot → see below
+- Data Extraction Chatbot → [`data_extraction_backend/README.md`](data_extraction_backend/README.md)
+
+---
+
 # AI Calendar Scheduling Chatbot
 
 A production-grade, conversational AI assistant that schedules appointments on **Google Calendar** and **Microsoft Outlook** via natural language. Built with **Python (FastAPI)** on the backend and **Next.js** on the frontend, powered by **Claude** (Anthropic) with tool-use.
