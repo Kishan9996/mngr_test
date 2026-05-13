@@ -165,6 +165,14 @@ class DBSessionStore(AbstractSessionStore):
             ).all()
             return list(rows)
 
+    def clear_history(self, session_id: str) -> None:
+        with SessionLocal() as db:
+            db.query(ConversationMessage)\
+              .filter(ConversationMessage.session_id == session_id)\
+              .delete()
+            db.commit()
+        logger.info("Cleared conversation history for session %s", session_id)
+
     def append_message(self, session_id: str, message: dict) -> None:
         with SessionLocal() as db:
             content_json = _serialize_message(message)

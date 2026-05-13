@@ -42,6 +42,10 @@ class AbstractSessionStore(ABC):
     def connected_providers(self, session_id: str) -> list[str]: ...
 
     @abstractmethod
+    def clear_history(self, session_id: str) -> None:
+        """Delete all conversation messages for this session."""
+
+    @abstractmethod
     def append_message(self, session_id: str, message: dict) -> None: ...
 
     @abstractmethod

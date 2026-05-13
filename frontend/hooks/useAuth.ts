@@ -4,9 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { apiLogin, apiLogout, apiMe, apiRegister } from "@/lib/api";
 import {
   clearSession,
-  getStoredSessionId,
   getStoredUser,
-  SESSION_KEY,
   setStoredSessionId,
   setStoredUser,
   type StoredUser,

@@ -89,6 +89,14 @@ class SessionStore(AbstractSessionStore):
             return []
         return list(session.calendar_tokens.keys())
 
+    def clear_history(self, session_id: str) -> None:
+        try:
+            session = self.get(session_id)
+            with self._sessions_lock:
+                session.conversation_history.clear()
+        except Exception:
+            pass
+
     def append_message(self, session_id: str, message: dict) -> None:
         session = self.get_or_create(session_id)
         with self._sessions_lock:

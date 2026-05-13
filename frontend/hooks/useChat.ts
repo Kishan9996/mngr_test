@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
-import { getChatHistory, sendMessage } from "@/lib/api";
+import { clearChatHistory, getCalendarStatus, getChatHistory, sendMessage } from "@/lib/api";
 import { getStoredSessionId } from "@/lib/auth";
 import type { Message } from "@/lib/types";
 
@@ -39,22 +39,26 @@ export function useChat() {
     }
     setSessionId(id);
 
+    // Fetch history and initial calendar status in parallel
     setHistoryLoading(true);
-    getChatHistory(id)
-      .then(({ messages: serverMsgs }) => {
-        setMessages(
-          serverMsgs.length > 0
-            ? serverMsgs.map((m) => ({
-                id: uuidv4(),
-                role: m.role as "user" | "assistant",
-                content: m.content,
-                timestamp: new Date(),
-              }))
-            : [GREETING]
-        );
-      })
-      .catch(() => setMessages([GREETING]))
-      .finally(() => setHistoryLoading(false));
+    Promise.all([
+      getChatHistory(id),
+      getCalendarStatus(id).catch(() => ({ connected_providers: [] as string[] })),
+    ]).then(([{ messages: serverMsgs }, calStatus]) => {
+      setMessages(
+        serverMsgs.length > 0
+          ? serverMsgs.map((m) => ({
+              id: uuidv4(),
+              role: m.role as "user" | "assistant",
+              content: m.content,
+              timestamp: new Date(),
+            }))
+          : [GREETING]
+      );
+      setConnectedProviders(calStatus.connected_providers);
+    })
+    .catch(() => setMessages([GREETING]))
+    .finally(() => setHistoryLoading(false));
   }, []);
 
   const send = useCallback(
@@ -103,6 +107,16 @@ export function useChat() {
     setNeedsReconnect((prev) => prev.filter((p) => p !== provider));
   }, []);
 
+  const resetConversation = useCallback(async () => {
+    if (!sessionId) return;
+    try {
+      await clearChatHistory(sessionId);
+    } catch { /* ignore */ }
+    setMessages([GREETING]);
+    setNeedsReconnect([]);
+    setError(null);
+  }, [sessionId]);
+
   return {
     sessionId,
     messages,
@@ -114,5 +128,6 @@ export function useChat() {
     send,
     refreshProviders,
     dismissReconnect,
+    resetConversation,
   };
 }

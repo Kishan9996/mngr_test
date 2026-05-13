@@ -26,16 +26,23 @@ export function CalendarConnect({
 }: Props) {
   const [loading, setLoading] = useState<string | null>(null);
 
-  // Poll calendar status every 3 s to pick up post-OAuth state
+  // Fetch immediately on mount, then poll every 5 s only to catch OAuth callbacks.
+  // The immediate fetch eliminates the visible "Not connected" flash on every refresh.
   useEffect(() => {
     if (!sessionId) return;
-    const id = setInterval(async () => {
+
+    let cancelled = false;
+
+    async function check() {
       try {
         const status = await getCalendarStatus(sessionId);
-        onProviderChange(status.connected_providers);
-      } catch { /* backend may not be ready */ }
-    }, 3000);
-    return () => clearInterval(id);
+        if (!cancelled) onProviderChange(status.connected_providers);
+      } catch { /* ignore */ }
+    }
+
+    check(); // fire right away
+    const id = setInterval(check, 5000); // then poll for OAuth return
+    return () => { cancelled = true; clearInterval(id); };
   }, [sessionId, onProviderChange]);
 
   async function handleConnect(provider: string) {
