@@ -2,7 +2,14 @@
   "permissions": {
     "allow": [
       "Bash(python -c \"import sqlalchemy, passlib, jose, fastapi, anthropic; print\\('All core packages OK'\\)\")",
-      "Bash(python3 -c \"import sqlalchemy, passlib, jose, fastapi, anthropic; print\\('All core packages OK'\\)\")"
+      "Bash(python3 -c \"import sqlalchemy, passlib, jose, fastapi, anthropic; print\\('All core packages OK'\\)\")",
+      "Bash(python3 -c \"import slowapi, limits; print\\('slowapi', slowapi.__version__, '| limits OK'\\)\")",
+      "Bash(.venv/bin/python -c \"import slowapi, limits; print\\('slowapi', slowapi.__version__\\)\")",
+      "Bash(.venv/bin/python -c \"import slowapi, limits; print\\('OK'\\)\")",
+      "Bash(make test *)",
+      "Bash(python3 -m pytest tests/test_chat_api.py::TestChatEndpoint::test_send_message_returns_response tests/test_chat_api.py::TestCalendarEndpoints::test_start_oauth_google_redirects -v --tb=short)",
+      "Bash(.venv/bin/pytest tests/ -v --tb=short)",
+      "Bash(.venv/bin/python -c ' *)"
     ]
   }
 }

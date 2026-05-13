@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "sqlite:///./chatbot.db"
 
+    # Cache — leave empty to fall back to in-memory TTL cache
+    redis_url: str = ""
+
     # CORS
     cors_origins: list[str] = ["http://localhost:3000"]
 

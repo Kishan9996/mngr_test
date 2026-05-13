@@ -1,18 +1,23 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Calendar, LogOut, Send } from "lucide-react";
+import { Calendar, CalendarDays, Loader2, LogOut, MessageSquare, Send } from "lucide-react";
 import { useChat } from "@/hooks/useChat";
 import type { StoredUser } from "@/lib/auth";
+import { BookingsView } from "./BookingsView";
 import { CalendarConnect } from "./CalendarConnect";
 import { ChatMessage } from "./ChatMessage";
+import { ProfilePanel } from "./ProfilePanel";
 import { TypingIndicator } from "./TypingIndicator";
 
 const QUICK_PROMPTS = [
-  "Schedule a 30-min meeting tomorrow",
-  "Book a 1-hour call this week",
-  "Find a free slot on Friday",
+  "Team standup — 30 min, next 2 days",
+  "1-hour client call this week",
+  "Quick 15-min check-in tomorrow",
+  "Book a recurring Monday meeting",
 ];
+
+type View = "chat" | "bookings";
 
 interface Props {
   user: StoredUser;
@@ -24,6 +29,7 @@ export function ChatInterface({ user, onLogout }: Props) {
     sessionId,
     messages,
     isLoading,
+    historyLoading,
     connectedProviders,
     needsReconnect,
     send,
@@ -31,12 +37,15 @@ export function ChatInterface({ user, onLogout }: Props) {
     dismissReconnect,
   } = useChat();
 
+  const [view, setView] = useState<View>("chat");
   const [input, setInput] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isLoading]);
+    if (view === "chat") {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages, isLoading, view]);
 
   function handleSend() {
     const text = input.trim();
@@ -54,77 +63,115 @@ export function ChatInterface({ user, onLogout }: Props) {
 
   return (
     <div className="flex h-screen bg-gray-50">
-      {/* ── Chat area ─────────────────────────────────────────────────── */}
+      {/* ── Main area ─────────────────────────────────────────────────── */}
       <div className="flex flex-1 flex-col min-w-0">
+
         {/* Header */}
-        <header className="flex items-center gap-3 border-b border-gray-200 bg-white px-6 py-4 shadow-sm">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-600 text-white">
+        <header className="flex items-center gap-3 border-b border-gray-200 bg-white px-6 py-3 shadow-sm">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-600 text-white shrink-0">
             <Calendar size={20} />
           </div>
-          <div className="flex-1">
-            <h1 className="text-base font-semibold text-gray-900">AI Scheduling Assistant</h1>
-            <p className="text-xs text-gray-500">Powered by Claude</p>
+          <span className="text-base font-semibold text-gray-900 hidden sm:block">
+            AI Scheduling Assistant
+          </span>
+
+          {/* Tab switcher */}
+          <div className="ml-4 flex rounded-xl bg-gray-100 p-1 gap-1">
+            <TabButton
+              active={view === "chat"}
+              icon={<MessageSquare size={14} />}
+              label="Chat"
+              onClick={() => setView("chat")}
+            />
+            <TabButton
+              active={view === "bookings"}
+              icon={<CalendarDays size={14} />}
+              label="Bookings"
+              onClick={() => setView("bookings")}
+              badge={connectedProviders.length > 0 ? undefined : undefined}
+            />
           </div>
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-gray-400 hidden sm:block">{user.email}</span>
-            <button
-              onClick={onLogout}
-              title="Sign out"
-              className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors"
-            >
-              <LogOut size={16} />
-            </button>
-          </div>
+
+          <div className="flex-1" />
+          <span className="text-xs text-gray-400 hidden sm:block">{user.email}</span>
+          <button
+            onClick={() => void onLogout()}
+            title="Sign out"
+            className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors"
+          >
+            <LogOut size={16} />
+          </button>
         </header>
 
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4">
-          {messages.map((msg) => (
-            <ChatMessage key={msg.id} message={msg} />
-          ))}
-          {isLoading && <TypingIndicator />}
-          <div ref={bottomRef} />
-        </div>
+        {/* ── Chat view ─────────────────────────────────────────────── */}
+        {view === "chat" && (
+          <>
+            <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4">
+              {historyLoading ? (
+                <div className="flex flex-col items-center justify-center gap-2 py-16 text-gray-400">
+                  <Loader2 size={20} className="animate-spin" />
+                  <p className="text-xs">Loading your conversation…</p>
+                </div>
+              ) : (
+                messages.map((msg) => (
+                  <ChatMessage
+                    key={msg.id}
+                    message={msg}
+                    onOptionSelect={!isLoading ? send : undefined}
+                  />
+                ))
+              )}
+              {isLoading && <TypingIndicator />}
+              <div ref={bottomRef} />
+            </div>
 
-        {/* Quick prompts */}
-        {messages.length === 1 && !isLoading && (
-          <div className="flex flex-wrap gap-2 px-6 pb-2">
-            {QUICK_PROMPTS.map((p) => (
-              <button
-                key={p}
-                onClick={() => send(p)}
-                className="rounded-full border border-brand-500 bg-brand-50 px-3 py-1.5 text-xs text-brand-700 hover:bg-brand-100 transition-colors"
-              >
-                {p}
-              </button>
-            ))}
-          </div>
+            {messages.length === 1 && !isLoading && (
+              <div className="flex flex-wrap gap-2 px-6 pb-2">
+                {QUICK_PROMPTS.map((p) => (
+                  <button
+                    key={p}
+                    onClick={() => send(p)}
+                    className="rounded-full border border-brand-500 bg-brand-50 px-3 py-1.5 text-xs text-brand-700 hover:bg-brand-100 transition-colors"
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div className="border-t border-gray-200 bg-white px-6 py-4">
+              <div className="flex items-end gap-3 rounded-2xl border border-gray-300 bg-gray-50 px-4 py-3 focus-within:border-brand-500 focus-within:ring-2 focus-within:ring-brand-100 transition-all">
+                <textarea
+                  rows={1}
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Type a message… (Enter to send)"
+                  className="flex-1 resize-none bg-transparent text-sm text-gray-800 placeholder-gray-400 outline-none max-h-32"
+                  disabled={isLoading}
+                />
+                <button
+                  onClick={handleSend}
+                  disabled={!input.trim() || isLoading}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  <Send size={15} />
+                </button>
+              </div>
+              <p className="mt-1.5 text-center text-[11px] text-gray-400">
+                Verify appointment details before relying on them.
+              </p>
+            </div>
+          </>
         )}
 
-        {/* Input */}
-        <div className="border-t border-gray-200 bg-white px-6 py-4">
-          <div className="flex items-end gap-3 rounded-2xl border border-gray-300 bg-gray-50 px-4 py-3 focus-within:border-brand-500 focus-within:ring-2 focus-within:ring-brand-100 transition-all">
-            <textarea
-              rows={1}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Type a message… (Enter to send)"
-              className="flex-1 resize-none bg-transparent text-sm text-gray-800 placeholder-gray-400 outline-none max-h-32"
-              disabled={isLoading}
-            />
-            <button
-              onClick={handleSend}
-              disabled={!input.trim() || isLoading}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            >
-              <Send size={15} />
-            </button>
-          </div>
-          <p className="mt-1.5 text-center text-[11px] text-gray-400">
-            AI can make mistakes — verify appointment details before relying on them.
-          </p>
-        </div>
+        {/* ── Bookings view ──────────────────────────────────────────── */}
+        {view === "bookings" && (
+          <BookingsView
+            sessionId={sessionId}
+            connectedProviders={connectedProviders}
+          />
+        )}
       </div>
 
       {/* ── Sidebar ───────────────────────────────────────────────────── */}
@@ -137,12 +184,14 @@ export function ChatInterface({ user, onLogout }: Props) {
           onDismissReconnect={dismissReconnect}
         />
 
+        <ProfilePanel />
+
         <div className="rounded-xl bg-brand-50 border border-brand-100 p-4">
           <p className="text-xs font-semibold text-brand-700 mb-2">Tips</p>
           <ul className="space-y-1.5 text-xs text-brand-600 list-disc list-inside">
             <li>Connect a calendar to get started</li>
-            <li>Tell me the meeting purpose and duration</li>
-            <li>I'll show available slots within 2–3 days</li>
+            <li>Switch to Bookings to see all events</li>
+            <li>Set your working hours in preferences</li>
             <li>Confirm before I book anything</li>
           </ul>
         </div>
@@ -154,5 +203,32 @@ export function ChatInterface({ user, onLogout }: Props) {
         )}
       </aside>
     </div>
+  );
+}
+
+function TabButton({
+  active,
+  icon,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+  badge?: number;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
+        active
+          ? "bg-white text-gray-900 shadow-sm"
+          : "text-gray-500 hover:text-gray-700"
+      }`}
+    >
+      {icon}
+      {label}
+    </button>
   );
 }

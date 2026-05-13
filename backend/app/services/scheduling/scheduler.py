@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytz
 
-from app.core.exceptions import CalendarAuthError, SlotNotAvailableError
+from app.core.exceptions import CalendarAuthError, PastBookingError, SlotNotAvailableError
 from app.models.appointment import AvailabilityRequest, CalendarEvent, CalendarTokens
 from app.services.calendar.factory import CalendarProviderFactory
 from app.services.session.session_store import SessionStore
@@ -43,8 +43,15 @@ class SchedulingService:
         provider = CalendarProviderFactory.create(calendar_provider, tokens)
 
         tz = pytz.timezone(timezone_str)
+        now = datetime.now(tz=tz)
         from_dt = tz.localize(datetime.fromisoformat(date_from))
         to_dt = tz.localize(datetime.fromisoformat(date_to))
+
+        # Never search in the past — clamp silently so Claude doesn't need to know
+        if from_dt < now:
+            from_dt = now
+        if to_dt < now:
+            to_dt = now
 
         request = AvailabilityRequest(
             date_from=from_dt,
@@ -89,12 +96,16 @@ class SchedulingService:
         calendar_provider: str,
         description: str = "",
         attendees: list[str] | None = None,
+        recurrence: str = "",
     ) -> dict:
         tokens = self._require_tokens(session_id, calendar_provider)
         provider = CalendarProviderFactory.create(calendar_provider, tokens)
 
         start_utc = datetime.fromisoformat(start_datetime).astimezone(timezone.utc)
         end_utc = datetime.fromisoformat(end_datetime).astimezone(timezone.utc)
+
+        if start_utc <= datetime.now(tz=timezone.utc):
+            raise PastBookingError()
 
         # Verify the slot is still free (optimistic check)
         busy = provider.get_busy_times(
@@ -113,6 +124,7 @@ class SchedulingService:
             timezone=timezone_str,
             description=description,
             attendees=attendees or [],
+            recurrence=recurrence,
         )
         created = provider.create_event(event)
 

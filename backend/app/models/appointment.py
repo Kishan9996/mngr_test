@@ -47,6 +47,8 @@ class CalendarEvent:
     timezone: str = "UTC"
     description: str = ""
     attendees: list[str] = field(default_factory=list)
+    # Optional RRULE string e.g. "RRULE:FREQ=WEEKLY;BYDAY=MO"
+    recurrence: str = ""
 
 
 @dataclass
@@ -60,6 +62,33 @@ class CreatedEvent:
     timezone: str
     html_link: str
     provider: str
+
+
+@dataclass
+class CalendarInfo:
+    """A calendar the user has access to."""
+    calendar_id: str
+    name: str
+    provider: str
+    is_primary: bool = False
+
+
+@dataclass
+class CalendarEventItem:
+    """A single event returned for the bookings list view."""
+    event_id: str
+    title: str
+    start: datetime        # UTC
+    end: datetime          # UTC
+    timezone: str
+    calendar_name: str
+    calendar_id: str
+    provider: str
+    html_link: str
+    is_all_day: bool = False
+    is_recurring: bool = False
+    description: str = ""
+    attendees: list[str] = field(default_factory=list)
 
 
 @dataclass

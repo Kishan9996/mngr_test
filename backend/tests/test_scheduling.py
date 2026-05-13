@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
-from app.core.exceptions import CalendarAuthError, SlotNotAvailableError
+from app.core.exceptions import CalendarAuthError, PastBookingError, SlotNotAvailableError
 from app.models.appointment import CalendarTokens, TimeRange
 from app.services.scheduling.scheduler import SchedulingService
 from app.services.session.session_store import SessionStore
@@ -83,9 +83,11 @@ class TestFilterAvailableSlots:
             assert slot.start >= datetime(2025, 1, 15, 10, 0, tzinfo=timezone.utc)
 
     def test_returns_all_when_no_busy(self):
+        # Use a date far in the future so the past-slot filter never triggers
+        future_date = (datetime.now(tz=timezone.utc) + timedelta(days=30)).date()
         slots = list(
             generate_candidate_slots(
-                on_date=date(2025, 1, 15),
+                on_date=future_date,
                 duration_minutes=60,
                 work_start="09:00",
                 work_end="12:00",
@@ -161,14 +163,25 @@ class TestSchedulingService:
         assert len(result["slots"]) == 1
         assert result["slots"][0]["index"] == 1
 
+    def test_create_appointment_raises_past_booking(self, service, session_with_google: str):
+        with pytest.raises(PastBookingError):
+            service.create_appointment(
+                session_id=session_with_google,
+                title="Test",
+                start_datetime="2025-01-15T10:00:00+00:00",
+                end_datetime="2025-01-15T11:00:00+00:00",
+                timezone_str="UTC",
+                calendar_provider="google",
+            )
+
     def test_create_appointment_raises_slot_not_available(
         self, service, session_with_google: str, mocker
     ):
-        # Mock provider to report the slot as busy
-        busy_range = TimeRange(
-            start=datetime(2025, 1, 15, 10, 0, tzinfo=timezone.utc),
-            end=datetime(2025, 1, 15, 11, 0, tzinfo=timezone.utc),
-        )
+        # Use a future datetime so PastBookingError is not raised first
+        future_start = datetime.now(tz=timezone.utc) + timedelta(days=1, hours=2)
+        future_end = future_start + timedelta(hours=1)
+
+        busy_range = TimeRange(start=future_start, end=future_end)
         mocker.patch(
             "app.services.scheduling.scheduler.CalendarProviderFactory.create"
         ).return_value.get_busy_times.return_value = [busy_range]
@@ -177,8 +190,8 @@ class TestSchedulingService:
             service.create_appointment(
                 session_id=session_with_google,
                 title="Test",
-                start_datetime="2025-01-15T10:00:00+00:00",
-                end_datetime="2025-01-15T11:00:00+00:00",
+                start_datetime=future_start.isoformat(),
+                end_datetime=future_end.isoformat(),
                 timezone_str="UTC",
                 calendar_provider="google",
             )

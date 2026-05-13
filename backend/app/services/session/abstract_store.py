@@ -17,8 +17,17 @@ class AbstractSessionStore(ABC):
     def get(self, session_id: str) -> SessionData: ...
 
     @abstractmethod
+    def get_or_create_for_user(self, user_id: str) -> str:
+        """Return the canonical session_id for this user, creating one if needed.
+
+        The server owns session IDs — callers must use this rather than
+        letting clients generate their own.
+        """
+
+    @abstractmethod
     def link_session_to_user(self, session_id: str, user_id: str) -> None:
-        """Associate a session with a user account (creates the record if needed)."""
+        """Bind an existing session to a user. Raises 403 if it already belongs
+        to a *different* user — prevents cross-user session hijacking."""
 
     @abstractmethod
     def save_tokens(self, session_id: str, tokens: CalendarTokens) -> None: ...

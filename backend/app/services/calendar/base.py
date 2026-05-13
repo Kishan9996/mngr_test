@@ -18,6 +18,8 @@ from app.core.exceptions import CalendarAuthError
 from app.models.appointment import (
     AvailabilityRequest,
     CalendarEvent,
+    CalendarEventItem,
+    CalendarInfo,
     CalendarTokens,
     CreatedEvent,
     TimeRange,
@@ -49,6 +51,16 @@ class CalendarProvider(ABC):
         """Create a calendar event and return the persisted result."""
 
     @abstractmethod
+    def list_calendars(self) -> list[CalendarInfo]:
+        """Return all calendars the authenticated user has access to."""
+
+    @abstractmethod
+    def get_upcoming_events(
+        self, start: date, end: date, timezone: str
+    ) -> list[CalendarEventItem]:
+        """Return events across ALL calendars within the given date range."""
+
+    @abstractmethod
     def get_auth_url(self, state: str) -> str:
         """Return the OAuth 2.0 authorisation URL for this provider."""
 
@@ -63,7 +75,15 @@ class CalendarProvider(ABC):
     # ── Template Method ────────────────────────────────────────────────────────
 
     def find_available_slots(self, request: AvailabilityRequest) -> list[TimeSlot]:
-        """Template method: fetch busy times → generate candidates → filter."""
+        """Template method: fetch busy times → generate candidates → filter.
+
+        Slots in the past are always excluded regardless of `date_from`.
+        """
+        import pytz as _pytz
+        from datetime import datetime as _dt
+
+        now_utc = _dt.now(tz=_pytz.utc)
+
         logger.info(
             "Finding slots | provider=%s from=%s to=%s duration=%dmin",
             self.provider_name,
@@ -88,7 +108,8 @@ class CalendarProvider(ABC):
                     tz_name=request.timezone,
                 )
             )
-            available = filter_available_slots(day_candidates, busy)
+            # Pass now_utc so past slots on today's date are excluded
+            available = filter_available_slots(day_candidates, busy, not_before=now_utc)
             all_slots.extend(available)
             current += timedelta(days=1)
 

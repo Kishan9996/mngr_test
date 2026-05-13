@@ -43,6 +43,22 @@ class ChatMessageResponse(BaseModel):
     needs_reconnect_providers: list[str] = Field(default_factory=list)
 
 
+class UserProfileResponse(BaseModel):
+    work_start: str
+    work_end: str
+    default_duration_minutes: int
+    timezone: str
+    onboarding_completed: bool
+
+
+class UserProfileUpdate(BaseModel):
+    work_start: str | None = None
+    work_end: str | None = None
+    default_duration_minutes: int | None = None
+    timezone: str | None = None
+    onboarding_completed: bool | None = None
+
+
 class CalendarStatusResponse(BaseModel):
     session_id: str
     connected_providers: list[str]
