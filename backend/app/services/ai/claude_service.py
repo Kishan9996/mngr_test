@@ -18,6 +18,7 @@ from app.core.config import get_settings
 from app.core.exceptions import AIServiceError, AppError, CalendarAuthError
 from app.models.chat import ProcessResult
 from app.services.ai.base import AIService
+from app.services.profile.profile_service import ProfileService
 from app.services.scheduling.scheduler import SchedulingService
 from app.services.session.abstract_store import AbstractSessionStore
 
@@ -77,18 +78,27 @@ TOOLS: list[dict[str, Any]] = [
     },
 ]
 
-SYSTEM_PROMPT = """You are a friendly and efficient AI scheduling assistant. \
+def _build_system_prompt() -> str:
+    from datetime import date
+    today = date.today().strftime("%A, %d %B %Y")
+    return f"""You are a friendly and efficient AI scheduling assistant. \
 Your sole purpose is to help users book appointments on their calendar.
+
+Today's date is **{today}**. Never suggest or attempt to book appointments \
+on a date or time that has already passed.
 
 ## Workflow
 1. **Greet** the user and ask what they'd like to schedule.
 2. **Collect** details conversationally — one or two questions at a time:
    - Meeting title / purpose
-   - Duration (offer: 30 min, 45 min, 1 hour, or custom)
+   - Duration (offer: 30 min, 45 min, 1 hour, or custom — the user's default \
+is pre-set but they can override it)
    - Preferred dates (today, tomorrow, this week, specific date)
 3. **Check calendars**: call `get_connected_calendars`. If none are connected, \
 ask the user to connect one via the sidebar and wait.
-4. **Fetch slots**: call `get_available_slots`.
+4. **Fetch slots**: call `get_available_slots`. Do not specify `work_start` or \
+`work_end` unless the user has explicitly told you different hours in this conversation; \
+leave them unset and the user's saved schedule will be used automatically.
 5. **Present slots** in a numbered, human-readable list (use the `display` field).
 6. **Confirm** the chosen slot and all details with the user before booking.
 7. **Book**: call `create_appointment` only after explicit user confirmation.
@@ -96,6 +106,7 @@ ask the user to connect one via the sidebar and wait.
 
 ## Rules
 - Never book without explicit confirmation ("yes", "book it", "confirm", etc.).
+- Never suggest or book a time in the past.
 - Present at most 6 slots. If none are found, suggest a wider date range.
 - Always show times in the user's timezone.
 - If a tool returns `needs_reconnect: true`, tell the user their calendar \
@@ -111,9 +122,11 @@ class ClaudeAIService(AIService):
         self,
         session_store: AbstractSessionStore,
         scheduling_service: SchedulingService,
+        profile_service: ProfileService,
     ) -> None:
         self._store = session_store
         self._scheduler = scheduling_service
+        self._profile_svc = profile_service
         self._settings = get_settings()
         self._client = anthropic.Anthropic(api_key=self._settings.anthropic_api_key)
 
@@ -151,7 +164,7 @@ class ClaudeAIService(AIService):
             response = self._client.messages.create(
                 model=self._settings.claude_model,
                 max_tokens=2048,
-                system=SYSTEM_PROMPT,
+                system=_build_system_prompt(),
                 tools=TOOLS,
                 messages=session.conversation_history,
             )
@@ -235,6 +248,10 @@ class ClaudeAIService(AIService):
             return self._scheduler.get_connected_calendars(session_id)
 
         if tool_name == "get_available_slots":
+            # Resolve work hours: tool override → user profile → global default
+            profile = self._profile_svc.get_or_create(session.user_id) if session.user_id else None
+            default_start = profile.work_start if profile else "09:00"
+            default_end = profile.work_end if profile else "17:00"
             return self._scheduler.get_available_slots(
                 session_id=session_id,
                 date_from=tool_input["date_from"],
@@ -242,8 +259,8 @@ class ClaudeAIService(AIService):
                 duration_minutes=tool_input["duration_minutes"],
                 timezone_str=tool_input.get("timezone", tz),
                 calendar_provider=tool_input["calendar_provider"],
-                work_start=tool_input.get("work_start", "09:00"),
-                work_end=tool_input.get("work_end", "17:00"),
+                work_start=tool_input.get("work_start") or default_start,
+                work_end=tool_input.get("work_end") or default_end,
             )
 
         if tool_name == "create_appointment":

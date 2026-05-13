@@ -39,3 +39,31 @@ export interface CalendarStatusResponse {
 }
 
 export type CalendarProvider = "google" | "outlook";
+
+// ── Profile ───────────────────────────────────────────────────────────────────
+
+export interface UserProfile {
+  work_start: string;               // "HH:MM"
+  work_end: string;                 // "HH:MM"
+  default_duration_minutes: number;
+  timezone: string;
+}
+
+// ── Bookings list ─────────────────────────────────────────────────────────────
+
+export interface CalendarEventItem {
+  event_id: string;
+  title: string;
+  start: string;       // ISO 8601
+  end: string;
+  is_all_day: boolean;
+  calendar_name: string;
+  calendar_id: string;
+  provider: CalendarProvider;
+  html_link: string;
+}
+
+export interface CalendarEventsResponse {
+  events: CalendarEventItem[];
+  fetched_from: string[];
+}

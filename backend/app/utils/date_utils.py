@@ -56,8 +56,12 @@ def generate_candidate_slots(
 def filter_available_slots(
     candidates: list[TimeSlot],
     busy_times: list[TimeRange],
+    not_before: datetime | None = None,
 ) -> list[TimeSlot]:
+    """Return slots that are free and start strictly after `not_before` (defaults to now)."""
+    cutoff = not_before if not_before is not None else datetime.now(tz=pytz.utc)
     return [
         slot for slot in candidates
-        if not any(slot.overlaps(busy) for busy in busy_times)
+        if slot.start > cutoff
+        and not any(slot.overlaps(busy) for busy in busy_times)
     ]
