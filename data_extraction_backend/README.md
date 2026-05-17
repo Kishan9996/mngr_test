@@ -1,6 +1,6 @@
 # AI Data Extraction Chatbot
 
-A production-grade, multi-tenant conversational AI that lets users query structured business data using plain English. Powered by **Claude** (Anthropic) with tool-use, built with **Python (FastAPI)** and **Next.js**.
+A production-grade, multi-tenant conversational AI that lets users query structured business data using plain English. Powered by **Grok** (xAI) or **Claude** (Anthropic) with tool-use — switchable via a single `.env` variable. Built with **Python (FastAPI)** and **Next.js**.
 
 ---
 
@@ -26,7 +26,7 @@ A production-grade, multi-tenant conversational AI that lets users query structu
 
 ```bash
 cd data_extraction_backend
-cp .env.example .env          # add your ANTHROPIC_API_KEY
+cp .env.example .env          # add your GROK_API_KEY (or ANTHROPIC_API_KEY for Claude)
 make install                  # creates .venv, installs all deps
 make seed-all                 # loads sample CSVs + Acme Retail demo org
 make dev                      # → http://localhost:8001
@@ -113,7 +113,9 @@ Acme Retail is specifically designed to exercise corner cases:
 
 | Pattern | Location | Purpose |
 |---------|----------|---------|
-| **Strategy** | `AIService` ABC → `ClaudeExtractionService` | Swap LLM without touching callers |
+| **Strategy (LLM)** | `BaseLLMProvider` → `ClaudeProvider` / `GrokProvider` | Swap LLM backend via `LLM_PROVIDER` in `.env`; no code changes |
+| **Factory** | `LLMProviderFactory` | Reads `LLM_PROVIDER` setting, returns the concrete provider |
+| **Strategy (AI service)** | `AIService` ABC → `ClaudeExtractionService` | Swap AI service implementation without touching callers |
 | **Repository** | `DataRepository` ABC → 4 concrete repos | Decouple SQL from business logic |
 | **Dispatch table** | `ClaudeExtractionService._dispatch()` | Route tool calls without if-elif chains |
 | **Cache-aside** | `QueryCache` wrapping every `_dispatch` call | DB only hit on cache miss |
@@ -149,7 +151,11 @@ data_extraction_backend/
     ├── services/
     │   ├── ai/
     │   │   ├── base.py                 # AIService ABC
-    │   │   └── claude_extraction_service.py  # Tool-use loop, caching, compression
+    │   │   ├── llm_types.py            # BaseLLMProvider, LLMResponse, ToolCall, LLMProviderFactory
+    │   │   ├── claude_extraction_service.py  # Provider-agnostic loop (Claude or Grok)
+    │   │   └── providers/
+    │   │       ├── claude_provider.py  # Anthropic — forwards cache_control as-is
+    │   │       └── grok_provider.py    # xAI — converts to OpenAI wire format
     │   ├── auth/
     │   │   └── auth_service.py         # register / login / refresh / logout
     │   ├── cache/
@@ -195,10 +201,24 @@ cp .env.example .env
 Open `.env` and fill in:
 
 ```env
-ANTHROPIC_API_KEY=sk-ant-...
+# LLM provider — "grok" (default) or "claude"
+LLM_PROVIDER=grok
+
+# xAI / Grok (when LLM_PROVIDER=grok)
+GROK_API_KEY=xai-...
+
+# Anthropic / Claude (when LLM_PROVIDER=claude)
+# ANTHROPIC_API_KEY=sk-ant-...
+
 JWT_SECRET=<run: python3 -c "import secrets; print(secrets.token_hex(32))">
 DATABASE_URL=sqlite:///./extraction.db
 FRONTEND_URL=http://localhost:3001
+```
+
+To switch providers, change one line — no code changes needed:
+```env
+LLM_PROVIDER=grok    # uses xAI Grok via OpenAI-compatible API
+LLM_PROVIDER=claude  # uses Anthropic Claude with prompt caching
 ```
 
 ### 2. Install dependencies
@@ -520,8 +540,11 @@ Claude's tool schemas have no `org_id` parameter. It is injected exclusively fro
 2. **Schema knowledge** — injected once per request in the system prompt (Anthropic-cached, ~90% token discount)
 3. **Conversation memory** — message history in `session_messages`; resolved customer IDs cached in `chat_sessions.context_json` to avoid repeat `lookup_customer` calls
 
-### Anthropic prompt caching
-The static system prompt block (schema + rules, ~1500 tokens) is marked `cache_control: ephemeral`. Anthropic caches it for 5 minutes — the dynamic block (today's date + resolved entities) is tiny and sent fresh each turn.
+### LLM provider switching (Strategy + Factory)
+`BaseLLMProvider` defines a single `chat()` method. `ClaudeProvider` forwards canonical Anthropic-format messages and `cache_control` blocks directly to Anthropic. `GrokProvider` converts to OpenAI wire format per call and drops `cache_control` silently (xAI doesn't support it). `LLMProviderFactory.create(settings)` reads `LLM_PROVIDER` from `.env`. The agentic loop, tool dispatch, and session store are identical regardless of provider.
+
+### Anthropic prompt caching (Claude only)
+The static system prompt block (schema + rules, ~1500 tokens) is marked `cache_control: ephemeral`. Anthropic caches it for 5 minutes — the dynamic block (today's date + resolved entities) is tiny and sent fresh each turn. When using Grok, the two blocks are joined into a single system string and sent without caching.
 
 ### Name disambiguation
 If `lookup_customer` returns `count > 1`, Claude is required to stop, present the full list (name + email + id), and ask the user to confirm before any further queries. The entity cache is only populated on unambiguous (`count == 1`) lookups.

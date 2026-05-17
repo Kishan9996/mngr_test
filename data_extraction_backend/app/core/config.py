@@ -12,9 +12,16 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
-    # Anthropic
+    # LLM provider — "claude" (default) or "grok"
+    llm_provider: str = "grok"
+
+    # Anthropic / Claude
     anthropic_api_key: str = ""
     claude_model: str = "claude-sonnet-4-6"
+
+    # xAI / Grok  (only required when llm_provider=grok)
+    grok_api_key: str = ""
+    grok_model: str = "grok-3"
 
     # App
     app_env: str = "development"
