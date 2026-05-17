@@ -1,9 +1,11 @@
-"""Claude AI service with tool-use for calendar scheduling.
+"""Provider-agnostic AI service for calendar scheduling.
 
 Design patterns:
-- Strategy: implements AIService — swap LLM without touching callers.
-- Command dispatch table: tool calls routed through _dispatch(), keeping
-  the agentic loop free of conditionals.
+- Strategy (outer): ClaudeAIService implements AIService — swap without touching callers.
+- Strategy (inner): BaseLLMProvider is injected via LLMProviderFactory — swap LLM
+  backend (Claude ↔ Grok) by setting LLM_PROVIDER in .env; no code changes needed.
+- Command dispatch table: tool calls routed through _dispatch(), keeping the
+  agentic loop free of conditionals.
 """
 
 from __future__ import annotations
@@ -18,13 +20,14 @@ from app.core.config import get_settings
 from app.core.exceptions import AIServiceError, AppError, CalendarAuthError
 from app.models.chat import ProcessResult
 from app.services.ai.base import AIService
+from app.services.ai.llm_types import BaseLLMProvider, LLMProviderFactory, ToolCall
 from app.services.profile.profile_service import ProfileService
 from app.services.scheduling.scheduler import SchedulingService
 from app.services.session.abstract_store import AbstractSessionStore
 
 logger = logging.getLogger(__name__)
 
-# ── Tool definitions ──────────────────────────────────────────────────────────
+# ── Tool definitions (Anthropic canonical format — GrokProvider converts internally) ──
 
 TOOLS: list[dict[str, Any]] = [
     {
@@ -82,12 +85,12 @@ TOOLS: list[dict[str, Any]] = [
     },
 ]
 
+
 def _build_system_prompt() -> str:
-    from datetime import date
-    today = date.today().strftime("%A, %d %B %Y")
     from datetime import date, timedelta
-    today_str = today
-    default_to = (date.today() + timedelta(days=3)).isoformat()
+    today = date.today()
+    today_str = today.strftime("%A, %d %B %Y")
+    default_to = (today + timedelta(days=3)).isoformat()
 
     return f"""You are a friendly and efficient AI scheduling assistant. \
 Your sole purpose is to help users book appointments on their calendar.
@@ -134,7 +137,11 @@ connection has expired and ask them to reconnect from the sidebar.
 
 
 class ClaudeAIService(AIService):
-    """Claude-powered AI service with tool-use for calendar scheduling."""
+    """Provider-agnostic AI service for calendar scheduling.
+
+    The name is kept for backward compatibility with DI wiring; the actual
+    LLM backend is determined at runtime by LLM_PROVIDER in .env.
+    """
 
     def __init__(
         self,
@@ -146,7 +153,8 @@ class ClaudeAIService(AIService):
         self._scheduler = scheduling_service
         self._profile_svc = profile_service
         self._settings = get_settings()
-        self._client = anthropic.Anthropic(api_key=self._settings.anthropic_api_key)
+        self._provider: BaseLLMProvider = LLMProviderFactory.create(self._settings)
+        logger.info("AI provider: %s / model: %s", self._settings.llm_provider, _active_model(self._settings))
 
     def process_message(
         self, session_id: str, user_message: str, timezone: str = "UTC"
@@ -165,6 +173,9 @@ class ClaudeAIService(AIService):
         except anthropic.APIError as exc:
             logger.error("Anthropic API error: %s", exc)
             raise AIServiceError(str(exc)) from exc
+        except Exception as exc:
+            logger.error("LLM provider error: %s", exc)
+            raise AIServiceError(str(exc)) from exc
 
         return ProcessResult(
             text=text,
@@ -174,33 +185,40 @@ class ClaudeAIService(AIService):
     # ── Private ───────────────────────────────────────────────────────────────
 
     def _agentic_loop(self, session_id: str) -> tuple[str, set[str]]:
-        """Drive the Claude tool-use loop; accumulate reconnect providers."""
+        """Drive the LLM tool-use loop; accumulate reconnect providers."""
         all_needs_reconnect: set[str] = set()
         session = self._store.get(session_id)
 
         while True:
-            response = self._client.messages.create(
-                model=self._settings.claude_model,
-                max_tokens=2048,
+            response = self._provider.chat(
                 system=_build_system_prompt(),
                 tools=TOOLS,
                 messages=session.conversation_history,
+                max_tokens=2048,
             )
 
+            # Persist assistant turn in canonical dict format
+            canonical_content: list[dict] = []
+            if response.text:
+                canonical_content.append({"type": "text", "text": response.text})
+            for tc in response.tool_calls:
+                canonical_content.append({
+                    "type": "tool_use",
+                    "id": tc.id,
+                    "name": tc.name,
+                    "input": tc.input,
+                })
             self._store.append_message(
                 session_id,
-                {"role": "assistant", "content": response.content},
+                {"role": "assistant", "content": canonical_content},
             )
 
             if response.stop_reason == "end_turn":
-                text = next(
-                    (b.text for b in response.content if hasattr(b, "text")), ""
-                )
-                return text, all_needs_reconnect
+                return response.text, all_needs_reconnect
 
             if response.stop_reason == "tool_use":
                 tool_results, needs_reconnect = self._execute_tools(
-                    session_id, response.content
+                    session_id, response.tool_calls
                 )
                 all_needs_reconnect.update(needs_reconnect)
                 self._store.append_message(
@@ -214,24 +232,20 @@ class ClaudeAIService(AIService):
             return "Something unexpected happened. Please try again.", all_needs_reconnect
 
     def _execute_tools(
-        self, session_id: str, content_blocks: list
+        self, session_id: str, tool_calls: list[ToolCall]
     ) -> tuple[list[dict[str, Any]], set[str]]:
-        """Execute all tool_use blocks; return results and reconnect provider set."""
+        """Execute all tool calls; return canonical tool_result blocks and reconnect set."""
         results: list[dict[str, Any]] = []
         needs_reconnect: set[str] = set()
 
-        for block in content_blocks:
-            if block.type != "tool_use":
-                continue
-
-            logger.info("Tool call: %s | input=%s", block.name, block.input)
+        for tc in tool_calls:
+            logger.info("Tool call: %s | input=%s", tc.name, tc.input)
 
             try:
-                output = self._dispatch(session_id, block.name, block.input)
+                output = self._dispatch(session_id, tc.name, tc.input)
                 content = json.dumps(output)
                 is_error = False
             except CalendarAuthError as exc:
-                # Surface to the frontend so the reconnect prompt appears
                 needs_reconnect.add(exc.provider)
                 content = json.dumps({
                     "error": exc.message,
@@ -243,15 +257,15 @@ class ClaudeAIService(AIService):
             except AppError as exc:
                 content = json.dumps({"error": exc.message})
                 is_error = True
-                logger.warning("Tool %s failed: %s", block.name, exc.message)
+                logger.warning("Tool %s failed: %s", tc.name, exc.message)
             except Exception as exc:
                 content = json.dumps({"error": f"Unexpected error: {exc}"})
                 is_error = True
-                logger.exception("Unexpected error in tool %s", block.name)
+                logger.exception("Unexpected error in tool %s", tc.name)
 
             results.append({
                 "type": "tool_result",
-                "tool_use_id": block.id,
+                "tool_use_id": tc.id,
                 "content": content,
                 "is_error": is_error,
             })
@@ -266,7 +280,6 @@ class ClaudeAIService(AIService):
             return self._scheduler.get_connected_calendars(session_id)
 
         if tool_name == "get_available_slots":
-            # Resolve work hours: tool override → user profile → global default
             profile = self._profile_svc.get_or_create(session.user_id) if session.user_id else None
             default_start = profile.work_start if profile else "09:00"
             default_end = profile.work_end if profile else "17:00"
@@ -295,3 +308,9 @@ class ClaudeAIService(AIService):
             )
 
         raise ValueError(f"Unknown tool: {tool_name}")
+
+
+def _active_model(settings: Any) -> str:
+    if settings.llm_provider.lower() == "grok":
+        return settings.grok_model
+    return settings.claude_model
