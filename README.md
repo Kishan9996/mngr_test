@@ -15,7 +15,7 @@ Each project has its own README with full setup instructions:
 
 # AI Calendar Scheduling Chatbot
 
-A production-grade, conversational AI assistant that schedules appointments on **Google Calendar** and **Microsoft Outlook** via natural language. Built with **Python (FastAPI)** on the backend and **Next.js** on the frontend, powered by **Claude** (Anthropic) with tool-use.
+A production-grade, conversational AI assistant that schedules appointments on **Google Calendar** and **Microsoft Outlook** via natural language. Built with **Python (FastAPI)** on the backend and **Next.js** on the frontend, powered by **Grok** (xAI) or **Claude** (Anthropic) with tool-use — switchable via a single `.env` variable.
 
 ---
 
@@ -94,11 +94,13 @@ A production-grade, conversational AI assistant that schedules appointments on *
 
 | Pattern | Location | Purpose |
 |---------|----------|---------|
-| **Strategy** | `CalendarProvider` base + Google/Outlook | Swap calendar backends without touching callers |
-| **Factory Method** | `CalendarProviderFactory` | Instantiate the right provider from a string name |
+| **Strategy (LLM)** | `BaseLLMProvider` → `ClaudeProvider` / `GrokProvider` | Swap LLM backend via `LLM_PROVIDER` in `.env`; no code changes |
+| **Factory** | `LLMProviderFactory` | Reads `LLM_PROVIDER` setting, returns the concrete provider |
+| **Strategy (Calendar)** | `CalendarProvider` base + Google/Outlook | Swap calendar backends without touching callers |
+| **Factory Method** | `CalendarProviderFactory` | Instantiate the right calendar provider from a string name |
 | **Template Method** | `CalendarProvider.find_available_slots()` | Shared slot-filter algorithm; subclasses only override `get_busy_times` |
 | **Singleton** | `DBSessionStore` | Single source of truth for all session state |
-| **Command (dispatch table)** | `ClaudeAIService._dispatch()` | Route Claude tool calls without if-elif chains |
+| **Command (dispatch table)** | `ClaudeAIService._dispatch()` | Route tool calls without if-elif chains |
 | **Dependency Injection** | FastAPI `Depends()` | Loose coupling; production vs. test stores swapped in one place |
 | **Repository** | `AbstractSessionStore` ABC | Decouple storage from business logic; in-memory for tests, SQLite in production |
 
@@ -135,7 +137,11 @@ chatbot Task/
 │       │   │   └── auth_service.py     # JWT creation/verification, direct bcrypt hashing
 │       │   ├── ai/
 │       │   │   ├── base.py             # AIService ABC
-│       │   │   └── claude_service.py   # Agentic loop, reconnect detection, today's date in prompt
+│       │   │   ├── llm_types.py        # BaseLLMProvider, LLMResponse, ToolCall, LLMProviderFactory
+│       │   │   ├── claude_service.py   # Provider-agnostic agentic loop (Claude or Grok)
+│       │   │   └── providers/
+│       │   │       ├── claude_provider.py  # Anthropic — passes canonical messages as-is
+│       │   │       └── grok_provider.py    # xAI — converts to OpenAI wire format
 │       │   ├── calendar/
 │       │   │   ├── base.py             # CalendarProvider ABC + Template Method
 │       │   │   ├── google_calendar.py  # All-calendar freebusy + events, retry, 5-min list cache
@@ -218,8 +224,16 @@ cp .env.example .env
 Edit `backend/.env`:
 
 ```env
-# Required
-ANTHROPIC_API_KEY=sk-ant-...
+# LLM provider — "grok" (default) or "claude"
+LLM_PROVIDER=grok
+
+# xAI / Grok (when LLM_PROVIDER=grok)
+GROK_API_KEY=xai-...
+
+# Anthropic / Claude (when LLM_PROVIDER=claude)
+# ANTHROPIC_API_KEY=sk-ant-...
+
+# Auth & DB
 JWT_SECRET=<run: python3 -c "import secrets; print(secrets.token_hex(32))">
 DATABASE_URL=sqlite:///./chatbot.db
 REDIS_URL=redis://localhost:6379        # redis://redis:6379 when using Docker
@@ -232,6 +246,15 @@ GOOGLE_CLIENT_SECRET=...
 OUTLOOK_CLIENT_ID=...
 OUTLOOK_CLIENT_SECRET=...
 OUTLOOK_TENANT_ID=common
+```
+
+#### Switching LLM providers
+
+Change one line in `backend/.env` — no code changes needed:
+
+```env
+LLM_PROVIDER=grok    # uses xAI Grok via OpenAI-compatible API
+LLM_PROVIDER=claude  # uses Anthropic Claude with prompt caching
 ```
 
 #### Google Calendar OAuth setup
@@ -471,8 +494,11 @@ Both providers query the user's full calendar list (not just "primary") for free
 ### Recurring events
 Detected from `recurringEventId` / `recurrence` (Google) and `type: occurrence|seriesMaster` (Outlook). Shown with a ↻ icon in the bookings list. The `create_appointment` tool accepts an optional `recurrence` RRULE string (e.g. `RRULE:FREQ=WEEKLY;BYDAY=MO`), supported on Google Calendar.
 
-### Claude with tool-use
-Claude drives the conversation and decides when to call `get_connected_calendars`, `get_available_slots`, or `create_appointment`. `CalendarAuthError` inside a tool call is caught separately and surfaced as `needs_reconnect_providers` in the API response — the frontend shows an amber reconnect prompt without requiring a page reload.
+### LLM provider switching (Strategy + Factory)
+The AI layer is fully provider-agnostic. `BaseLLMProvider` defines a single `chat()` method that accepts canonical Anthropic-format message dicts and returns a normalized `LLMResponse`. `ClaudeProvider` forwards these directly to Anthropic (preserving `cache_control` prompt caching). `GrokProvider` converts to OpenAI wire format on every call and translates the response back — the rest of the stack never sees the difference. `LLMProviderFactory.create(settings)` reads `LLM_PROVIDER` from `.env` and returns the right instance. To add a third provider, implement `BaseLLMProvider` and register one entry in the factory.
+
+### LLM tool-use agentic loop
+The active provider drives the conversation and decides when to call `get_connected_calendars`, `get_available_slots`, or `create_appointment`. `CalendarAuthError` inside a tool call is caught separately and surfaced as `needs_reconnect_providers` in the API response — the frontend shows an amber reconnect prompt without requiring a page reload.
 
 ### Retry with exponential backoff
 `with_retry(max_attempts=3, backoff_base=1.0)` in `utils/retry.py` wraps `get_busy_times`, `create_event`, and `list_calendars` on both providers. Only retries on transient codes (429, 500–504) and network errors — 401/403 raise immediately.

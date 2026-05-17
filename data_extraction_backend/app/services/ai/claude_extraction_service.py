@@ -1,13 +1,15 @@
-"""Claude AI service for natural-language data extraction.
+"""Provider-agnostic AI service for natural-language data extraction.
 
 Design patterns:
-  Strategy    — implements AIService; swap LLM without touching callers.
-  Dispatch    — tool calls routed through _dispatch(), loop stays clean.
+  Strategy (outer) — ClaudeExtractionService implements AIService; swap without touching callers.
+  Strategy (inner) — BaseLLMProvider injected via LLMProviderFactory; set LLM_PROVIDER in .env.
+  Dispatch         — tool calls routed through _dispatch(), loop stays clean.
 
 Performance:
-  Anthropic prompt cache  — static system prompt block marked cache_control.
+  Anthropic prompt cache  — static system prompt block marked cache_control
+                            (ClaudeProvider forwards it; GrokProvider drops it gracefully).
   Session entity cache    — resolved customers injected as tiny dynamic addendum.
-  Result truncation       — cap rows before sending back to Claude.
+  Result truncation       — cap rows before sending back to the model.
   History compression     — old tool_result blocks replaced with one-line summaries.
 
 Security:
@@ -28,6 +30,7 @@ from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.core.exceptions import AIServiceError, AppError, DataServiceError
 from app.services.ai.base import AIService
+from app.services.ai.llm_types import BaseLLMProvider, LLMProviderFactory, ToolCall
 from app.services.cache.query_cache import QueryCache
 from app.services.data.cross_domain_repository import CrossDomainRepository
 from app.services.data.customer_repository import CustomerRepository
@@ -37,13 +40,13 @@ from app.services.session.abstract_store import AbstractSessionStore
 
 logger = logging.getLogger(__name__)
 
-_MAX_ROWS_TO_CLAUDE = 15
+_MAX_ROWS_TO_LLM = 15
 _WRITE_KEYWORDS = re.compile(
     r"\b(INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|TRUNCATE|REPLACE|ATTACH)\b",
     re.IGNORECASE,
 )
 
-# ── DB schema description (static — Anthropic caches this) ────────────────────
+# ── DB schema description (static — Anthropic caches this block) ───────────────
 
 _DB_SCHEMA = """
 ## Database Schema (read-only, your org_id is automatically applied)
@@ -175,6 +178,7 @@ def _build_system_prompt(resolved_customers: dict[int, dict]) -> list[dict]:
     """Return a two-block system prompt.
 
     Block 0 (static):  schema + rules — Anthropic caches this across requests.
+                       GrokProvider strips cache_control and joins text gracefully.
     Block 1 (dynamic): today's date + resolved entities — small, always fresh.
     """
     static_text = f"""You are a helpful data analyst assistant. \
@@ -222,7 +226,11 @@ Return clear, readable summaries — never raw JSON or SQL.
 
 
 class ClaudeExtractionService(AIService):
-    """Claude-powered service with typed tool-use and multi-layer caching."""
+    """Provider-agnostic service with typed tool-use and multi-layer caching.
+
+    The name is kept for backward compatibility; the actual LLM backend is
+    determined at runtime by LLM_PROVIDER in .env.
+    """
 
     def __init__(
         self,
@@ -232,7 +240,12 @@ class ClaudeExtractionService(AIService):
         self._store = session_store
         self._cache = query_cache
         self._settings = get_settings()
-        self._client = anthropic.Anthropic(api_key=self._settings.anthropic_api_key)
+        self._provider: BaseLLMProvider = LLMProviderFactory.create(self._settings)
+        logger.info(
+            "AI provider: %s / model: %s",
+            self._settings.llm_provider,
+            _active_model(self._settings),
+        )
 
     def process_message(self, session_id: str, user_message: str) -> str:
         self._store.append_message(session_id, {"role": "user", "content": user_message})
@@ -244,6 +257,9 @@ class ClaudeExtractionService(AIService):
         except anthropic.APIError as exc:
             logger.error("Anthropic API error: %s", exc)
             raise AIServiceError(str(exc)) from exc
+        except Exception as exc:
+            logger.error("LLM provider error: %s", exc)
+            raise AIServiceError(str(exc)) from exc
 
     # ── Private ────────────────────────────────────────────────────────────────
 
@@ -251,25 +267,34 @@ class ClaudeExtractionService(AIService):
         session = self._store.get(session_id)
 
         while True:
-            response = self._client.messages.create(
-                model=self._settings.claude_model,
-                max_tokens=1024,
+            response = self._provider.chat(
                 system=_build_system_prompt(session.resolved_customers),
                 tools=TOOLS,
                 messages=_compress_history(session.conversation_history),
+                max_tokens=1024,
             )
 
+            # Persist assistant turn in canonical dict format
+            canonical_content: list[dict] = []
+            if response.text:
+                canonical_content.append({"type": "text", "text": response.text})
+            for tc in response.tool_calls:
+                canonical_content.append({
+                    "type": "tool_use",
+                    "id": tc.id,
+                    "name": tc.name,
+                    "input": tc.input,
+                })
             self._store.append_message(
-                session_id, {"role": "assistant", "content": response.content}
+                session_id,
+                {"role": "assistant", "content": canonical_content},
             )
 
             if response.stop_reason == "end_turn":
-                return next(
-                    (b.text for b in response.content if hasattr(b, "text")), ""
-                )
+                return response.text
 
             if response.stop_reason == "tool_use":
-                tool_results = self._execute_tools(session_id, response.content)
+                tool_results = self._execute_tools(session_id, response.tool_calls)
                 self._store.append_message(
                     session_id, {"role": "user", "content": tool_results}
                 )
@@ -279,38 +304,34 @@ class ClaudeExtractionService(AIService):
             logger.warning("Unexpected stop_reason: %s", response.stop_reason)
             return "Something unexpected happened. Please try again."
 
-    def _execute_tools(self, session_id: str, content_blocks: list) -> list[dict]:
+    def _execute_tools(self, session_id: str, tool_calls: list[ToolCall]) -> list[dict]:
         results: list[dict] = []
         session = self._store.get(session_id)
 
-        for block in content_blocks:
-            if block.type != "tool_use":
-                continue
-
-            logger.info("Tool call: %s | input=%s", block.name, block.input)
+        for tc in tool_calls:
+            logger.info("Tool call: %s | input=%s", tc.name, tc.input)
 
             try:
-                output  = self._dispatch(session_id, session.org_id, block.name, block.input)
-                content = json.dumps(_truncate(block.name, output))
+                output = self._dispatch(session_id, session.org_id, tc.name, tc.input)
+                content = json.dumps(_truncate(tc.name, output))
                 is_error = False
 
-                # Only cache when unambiguous — multiple matches require user confirmation first
-                if block.name == "lookup_customer" and output.get("found"):
+                if tc.name == "lookup_customer" and output.get("found"):
                     if output.get("count", 0) == 1:
                         self._store.cache_customer(session_id, output["customers"][0])
 
             except AppError as exc:
-                content  = json.dumps({"error": exc.message})
+                content = json.dumps({"error": exc.message})
                 is_error = True
-                logger.warning("Tool %s error: %s", block.name, exc.message)
+                logger.warning("Tool %s error: %s", tc.name, exc.message)
             except Exception as exc:
-                content  = json.dumps({"error": f"Unexpected error: {exc}"})
+                content = json.dumps({"error": f"Unexpected error: {exc}"})
                 is_error = True
-                logger.exception("Unexpected error in tool %s", block.name)
+                logger.exception("Unexpected error in tool %s", tc.name)
 
             results.append({
                 "type":        "tool_result",
-                "tool_use_id": block.id,
+                "tool_use_id": tc.id,
                 "content":     content,
                 "is_error":    is_error,
             })
@@ -320,7 +341,6 @@ class ClaudeExtractionService(AIService):
     def _dispatch(
         self, session_id: str, org_id: int, tool_name: str, tool_input: dict
     ) -> dict:
-        # Cache-aside: check before hitting DB
         cached = self._cache.get(org_id, tool_name, tool_input)
         if cached is not None:
             return cached
@@ -407,19 +427,25 @@ def _summarise(data: dict) -> dict:
 
 
 def _truncate(tool_name: str, result: dict) -> dict:
-    """Cap large result sets before sending to Claude."""
+    """Cap large result sets before sending to the LLM."""
     for key in ("rows", "orders", "tickets", "customers", "products"):
         rows = result.get(key)
-        if rows and len(rows) > _MAX_ROWS_TO_CLAUDE:
+        if rows and len(rows) > _MAX_ROWS_TO_LLM:
             return {
                 **result,
-                key:         rows[:_MAX_ROWS_TO_CLAUDE],
+                key:         rows[:_MAX_ROWS_TO_LLM],
                 "truncated": True,
                 "total":     len(rows),
-                "shown":     _MAX_ROWS_TO_CLAUDE,
+                "shown":     _MAX_ROWS_TO_LLM,
                 "hint":      (
-                    f"Showing {_MAX_ROWS_TO_CLAUDE} of {len(rows)} results. "
+                    f"Showing {_MAX_ROWS_TO_LLM} of {len(rows)} results. "
                     "Suggest the user add filters to narrow results."
                 ),
             }
     return result
+
+
+def _active_model(settings: Any) -> str:
+    if settings.llm_provider.lower() == "grok":
+        return settings.grok_model
+    return settings.claude_model
